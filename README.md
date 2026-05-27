@@ -1,3 +1,51 @@
-# Research-Copilot
-A chatbot where users can upload research articles they’ve found on their own. A combination of ElasticSearch and LLM. The LLM will respond to user queries with information strictly from the uploaded documents. If it can’t find enough information, we won’t answer the user’s query and request more context. The chatbot response may include citations or point the user to the location from the information was found. The user has the option to start multiple difference chats for different topics.
+# Research Copilot Backend
 
+This project uses Elasticsearch and LangChain to provide a research assistance backend.
+
+## Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
+- Python 3.10 or higher
+
+## Getting Started
+
+### 1. Clone the Repository
+```bash
+git clone https://github.com/Harshithr467/Research-Copilot.git
+cd Research-Copilot
+```
+
+### 2. Start Elasticsearch
+We use Docker Compose to run a local Elasticsearch instance (v8.12.0) with security disabled for development.
+
+```sh
+docker compose up -d
+```
+*Wait a few seconds for the service to initialize.*
+
+### 3. Setup Python Environment
+Create a virtual environment and install the required dependencies:
+
+```sh
+# Create virtual environment
+python3 -m venv venv
+
+# Activate it
+source venv/bin/activate  # On Linux/macOS
+# .\venv\Scripts\activate # On Windows
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+### 4. Verify Connection
+Run the health check script to ensure everything is working correctly:
+
+```bash
+python check_es_health.py
+```
+
+## Local Architecture
+- **Elasticsearch:** `http://localhost:9200`
+- **Security:** Disabled (`xpack.security.enabled=false`)
+- **Version:** 8.12.0 (Matches client library version)
