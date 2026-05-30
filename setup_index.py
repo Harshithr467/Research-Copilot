@@ -32,7 +32,9 @@ def create_research_index():
                 "properties": {
                     "author": {"type": "keyword"},
                     "year": {"type": "integer"},
-                    "source_file": {"type": "keyword"}
+                    "source_file": {"type": "keyword"},
+                    "parent_id": {"type": "keyword"},
+                    "chunk_id": {"type": "integer"}
                 }
             }
         }
