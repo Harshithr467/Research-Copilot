@@ -49,3 +49,13 @@ python check_es_health.py
 - **Elasticsearch:** `http://localhost:9200`
 - **Security:** Disabled (`xpack.security.enabled=false`)
 - **Version:** 8.12.0 (Matches client library version)
+
+## Backend API Server
+To run the local API server for testing uploads:
+
+1.  Ensure your virtual environment is active.
+2.  Run `pip install -r requirements.txt` to get the latest server libraries.
+3.  Start the server by running: `uvicorn api_server:app --reload`
+4.  Open your browser and navigate to `http://localhost:8000/docs` to use the interactive upload UI.
+
+The endpoint for PDF uploads is `POST /upload-pdf`.
