@@ -19,7 +19,7 @@ cd Research-Copilot
 We use Docker Compose to run a local Elasticsearch instance (v8.12.0) with security disabled for development.
 
 ```sh
-docker compose up -d
+docker compose -f elasticsearch/docker-compose.yml up -d
 ```
 *Wait a few seconds for the service to initialize.*
 
@@ -42,10 +42,11 @@ pip install -r requirements.txt
 Run the health check script to ensure everything is working correctly:
 
 ```bash
-python check_es_health.py
+python elasticsearch/check_es_health.py
 ```
 
 ## Local Architecture
 - **Elasticsearch:** `http://localhost:9200`
 - **Security:** Disabled (`xpack.security.enabled=false`)
 - **Version:** 8.12.0 (Matches client library version)
+- **Configuration:** All Elasticsearch-related files are located in the `elasticsearch/` directory.
