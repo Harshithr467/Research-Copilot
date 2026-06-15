@@ -19,7 +19,7 @@ cd Research-Copilot
 We use Docker Compose to run a local Elasticsearch instance (v8.12.0) with security disabled for development.
 
 ```sh
-docker compose -f elasticsearch/docker-compose.yml up -d
+docker compose -f indexing/docker-compose.yml up -d
 ```
 *Wait a few seconds for the service to initialize.*
 
@@ -42,7 +42,7 @@ pip install -r requirements.txt
 Run the health check script to ensure everything is working correctly:
 
 ```bash
-python elasticsearch/check_es_health.py
+python indexing/check_es_health.py
 ```
 
 ## Local Architecture
@@ -58,6 +58,7 @@ To run the local API server for testing uploads:
 3.  Start the server by running: `uvicorn api_server:app --reload`
 4.  Open your browser and navigate to `http://localhost:8000/docs` to use the interactive upload UI.
 
-The endpoint for PDF uploads is `POST /upload-pdf`.
+The endpoint for PDF uploads is `POST /upload-pdf`. Uploaded files are stored in the `uploaded_files/` directory, and text is automatically extracted using the `extraction` module.
 
-- **Configuration:** All Elasticsearch-related files are located in the `elasticsearch/` directory.
+- **Configuration:** All Elasticsearch-related files are located in the `indexing/` directory.
+- **Extraction:** PDF and DOCX text extraction logic is in the `extraction/` directory.

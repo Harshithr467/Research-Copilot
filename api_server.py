@@ -2,13 +2,16 @@ import os
 import shutil
 from fastapi import FastAPI, UploadFile, File
 import uvicorn
-
 from contextlib import asynccontextmanager
 
-# Installation instructions:
-# pip install fastapi uvicorn python-multipart
+# Import real extraction and ingestion functions
+from extraction.extractor import extract
+from indexing.ingester import ingest_paper
 
-UPLOAD_DIR = "temp_uploads"
+# Installation instructions:
+# pip install fastapi uvicorn python-multipart pymupdf python-docx
+
+UPLOAD_DIR = "uploaded_files"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -20,26 +23,19 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Research-Copilot API", lifespan=lifespan)
 
-def mock_text_extraction(file_path: str) -> dict:
-    """
-    Mock function to simulate text extraction from a PDF.
-    Matches the ResearchPaper structure from ingester.py.
-    """
-    print(f"Processing file for extraction: {file_path}")
-    
-    # Dummy ResearchPaper dictionary
+@app.get("/")
+async def root():
+    """Welcome message and basic health check."""
     return {
-        "title": "Mocked Research Paper Title",
-        "content": "This is some extracted text from the mock function. In a real scenario, this would be the actual content of the PDF.",
-        "author": "Mock Author",
-        "year": 2024,
-        "source_file": os.path.basename(file_path)
+        "message": "Welcome to the Research-Copilot API",
+        "docs": "Visit /docs for the interactive API documentation",
+        "status": "online"
     }
 
 @app.post("/upload-pdf")
 async def upload_pdf(file: UploadFile = File(...)):
     """
-    Upload a PDF file, save it locally, and trigger (mock) text extraction.
+    Upload a PDF file, save it locally, and trigger real text extraction.
     """
     file_path = os.path.join(UPLOAD_DIR, file.filename)
     
@@ -47,16 +43,25 @@ async def upload_pdf(file: UploadFile = File(...)):
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     
-    # Mock text extraction call
-    # Note: This is where actual text extraction and ingest_paper functions 
-    # from ingester.py will be called later.
-    extracted_data = mock_text_extraction(file_path)
-    
-    return {
-        "filename": file.filename,
-        "status": "success",
-        "mock_extracted_data": extracted_data
-    }
+    # Call the real text extraction function
+    try:
+        extracted_chunks = extract(file_path)
+        
+        # Note: ingest_paper from indexing.ingester will be integrated 
+        # in the next phase after verification.
+        
+        return {
+            "filename": file.filename,
+            "status": "success",
+            "extracted_chunks_count": len(extracted_chunks),
+            "data": extracted_chunks
+        }
+    except Exception as e:
+        return {
+            "filename": file.filename,
+            "status": "error",
+            "message": str(e)
+        }
 
 # Testing Instructions:
 # 1. Run the server: python api_server.py
