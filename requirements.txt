@@ -89,3 +89,5 @@ zstandard==0.25.0
 PyMuPDF>=1.23.0
 python-docx>=1.1.0
 pytest>=8.0.0
+langchain-huggingface>=0.0.1
+sentence-transformers>=3.0.0
