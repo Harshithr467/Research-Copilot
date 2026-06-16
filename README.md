@@ -19,7 +19,7 @@ cd Research-Copilot
 We use Docker Compose to run a local Elasticsearch instance (v8.12.0) with security disabled for development.
 
 ```sh
-docker compose -f elasticsearch/docker-compose.yml up -d
+docker compose -f backend/docker-compose.yml up -d
 ```
 *Wait a few seconds for the service to initialize.*
 
@@ -42,11 +42,45 @@ pip install -r requirements.txt
 Run the health check script to ensure everything is working correctly:
 
 ```bash
-python elasticsearch/check_es_health.py
+python backend/check_es_health.py
 ```
 
 ## Local Architecture
 - **Elasticsearch:** `http://localhost:9200`
 - **Security:** Disabled (`xpack.security.enabled=false`)
 - **Version:** 8.12.0 (Matches client library version)
-- **Configuration:** All Elasticsearch-related files are located in the `elasticsearch/` directory.
+- **Configuration:** All backend and Elasticsearch-related files are located in the `backend/` directory.
+
+## RAG Chat Endpoint
+
+The first backend RAG endpoint is available at `POST /chat`. It retrieves chunks for a `document_id`, builds a grounded prompt, asks Gemini for structured JSON, and validates that returned citations point to retrieved chunks with quotes present in the chunk text.
+
+```json
+{
+  "document_id": "paper_01",
+  "question": "What key elements does the author introduce on page 1?"
+}
+```
+
+Example local run:
+
+```sh
+docker compose -f backend/docker-compose.yml up -d
+python backend/setup_index.py
+python backend/ingest_chunked_dummy_data.py
+cd backend
+uvicorn app:app --reload
+```
+
+Then call:
+
+```sh
+curl -X POST http://127.0.0.1:8000/chat \
+  -H "Content-Type: application/json" \
+  -d "{\"document_id\":\"paper_01\",\"question\":\"What key elements does the author introduce on page 1?\"}"
+```
+
+Notes:
+- Set `GOOGLE_API_KEY` before ingestion and chat if you want vector embeddings and LLM answers.
+- `metadata.page_number` is optional. Exact page citations are returned only when ingestion receives real page-level metadata; the generic raw-content ingester does not guess page numbers.
+

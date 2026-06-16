@@ -1,6 +1,6 @@
 import os
 import time
-from typing import List, Dict
+from typing import List, cast
 from dotenv import load_dotenv
 from elasticsearch import Elasticsearch
 from google import genai
@@ -22,7 +22,13 @@ def get_embedding(text: str) -> List[float]:
             "output_dimensionality": 768
         }
     )
-    return result.embeddings[0].values
+    embeddings = result.embeddings
+    if not embeddings:
+        raise RuntimeError("Google GenAI did not return an embedding.")
+    values = embeddings[0].values
+    if values is None:
+        raise RuntimeError("Google GenAI did not return an embedding.")
+    return cast(List[float], values)
 
 def ingest_data():
     # Initialize Elasticsearch client
@@ -42,6 +48,7 @@ def ingest_data():
             "author": "Kerbl et al.",
             "year": 2023,
             "source_file": "kerbl_2023.pdf",
+            "page_number": 1,
             "content": """
             Radiance Field methods have recently revolutionized photorealistic synthesis of scenes captured with a handful of photos or videos. 
             However, achieving high visual quality still requires neural networks that are costly to train and render, while recent faster methods inevitably trade off visual quality for speed. 
@@ -58,6 +65,7 @@ def ingest_data():
             "author": "Zhang, R.",
             "year": 2024,
             "source_file": "quality_metrics_study.pdf",
+            "page_number": 1,
             "content": """
             Evaluating the perceptual quality of generated images is a critical task in computer vision. 
             Traditional metrics like Peak Signal-to-Noise Ratio (PSNR) and Structural Similarity Index (SSIM) often fail to capture human-like judgment of image quality, especially in the context of deep learning-based synthesis.
@@ -74,6 +82,7 @@ def ingest_data():
             "author": "Chen, L.",
             "year": 2025,
             "source_file": "neural_rendering_2025.pdf",
+            "page_number": 1,
             "content": """
             Neural rendering has seen rapid growth, with a focus on improving both speed and visual fidelity. 
             One of the key challenges remains the optimization of these models using loss functions that reflect human visual systems. 
@@ -118,7 +127,8 @@ def ingest_data():
                     "year": paper['year'],
                     "source_file": paper['source_file'],
                     "parent_id": paper['id'],
-                    "chunk_id": i
+                    "chunk_id": i,
+                    "page_number": paper["page_number"]
                 }
             }
             
