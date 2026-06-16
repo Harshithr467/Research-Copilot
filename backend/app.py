@@ -7,14 +7,14 @@ try:
     from .embeddings import embed_query
     from .llm_provider import GeminiProvider
     from .prompting import build_grounded_prompt
-    from .rag_types import ChatRequest, ChatResponse
+    from .rag_types import ChatRequest, ChatResponse, Citation
     from .retrieval import extract_page_number, retrieve_chunks
 except ImportError:
     from citations import FALLBACK_ANSWER, validate_citations
     from embeddings import embed_query
     from llm_provider import GeminiProvider
     from prompting import build_grounded_prompt
-    from rag_types import ChatRequest, ChatResponse
+    from rag_types import ChatRequest, ChatResponse, Citation
     from retrieval import extract_page_number, retrieve_chunks
 
 
@@ -47,4 +47,11 @@ def chat(request: ChatRequest):
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"LLM generation failed: {exc}") from exc
 
-    return ChatResponse(**validate_citations(llm_response, chunks))
+    validated_response = validate_citations(llm_response, chunks)
+    return ChatResponse(
+        answer=validated_response["answer"],
+        citations=[
+            Citation(**citation)
+            for citation in validated_response["citations"]
+        ],
+    )
