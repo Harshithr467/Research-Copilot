@@ -26,7 +26,7 @@ def verify_chunks():
             {"metadata.parent_id": "asc"},
             {"metadata.chunk_id": "asc"}
         ],
-        "size": 20
+        "size": 400
     }
 
     try:
@@ -54,11 +54,15 @@ def verify_chunks():
             parent_id = metadata.get('parent_id', 'N/A')
             chunk_id = metadata.get('chunk_id', 'N/A')
             title = source.get('title', 'N/A')
+            author = metadata.get('author', 'N/A')
+            year = metadata.get('year', 'N/A')
             content_snippet = source.get('content', '')[:75].replace('\n', ' ') + "..."
 
             print(f"Parent ID : {parent_id}")
             print(f"Chunk ID  : {chunk_id}")
             print(f"Title     : {title}")
+            print(f"Author     : {author}")
+            print(f"Year     : {year}")
             print(f"Content   : {content_snippet}")
             print("-" * 50)
 

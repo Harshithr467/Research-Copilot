@@ -1,18 +1,38 @@
 import os
 import hashlib
 import uuid
+import threading
+import time
 from typing import TypedDict, List, Dict
 from dotenv import load_dotenv
 from elasticsearch import Elasticsearch
-from google import genai
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # Load environment variables
 load_dotenv()
 
-# Configure Google GenAI Client
-# Note: Using the new google-genai SDK as google-generativeai is deprecated.
-client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+# Global singleton and a lock to ensure thread safety
+_embedding_model = None
+_model_ready_event = threading.Event()
+
+def _load_model_background():
+    """Heavy initialization performed in a background thread."""
+    global _embedding_model
+    try:
+        # Import inside the thread to keep the main import fast
+        from langchain_huggingface import HuggingFaceEmbeddings
+        print("\n[Background] Starting to load embedding model (all-MiniLM-L6-v2)...")
+        
+        model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+        
+        _embedding_model = model
+        _model_ready_event.set() # Signal that the model is ready
+        print("[Background] Embedding model loaded successfully.")
+    except Exception as e:
+        print(f"[Background] Failed to load embedding model: {e}")
+
+# Start the background loading immediately upon module import
+# daemon=True ensures this thread doesn't block the server from shutting down
+threading.Thread(target=_load_model_background, daemon=True).start()
 
 class ResearchPaper(TypedDict):
     """Type definition for the research paper input dictionary."""
@@ -22,58 +42,24 @@ class ResearchPaper(TypedDict):
     year: int
     source_file: str
 
-def get_embedding(text: str) -> List[float]:
+def get_embedding_model():
     """
-    Generate vector embedding for a given text chunk.
-    
-    Uses gemini-embedding-2 with 768 dimensions to match the index mapping.
+    Returns the global embedding model. 
+    If it's still loading in the background, this will wait until it's ready.
     """
-    result = client.models.embed_content(
-        model="gemini-embedding-2",
-        contents=text,
-        config={
-            "task_type": "retrieval_document",
-            "output_dimensionality": 768
-        }
-    )
-    return result.embeddings[0].values
+    if not _model_ready_event.is_set():
+        print("Waiting for background model to finish loading... (this only happens on the first upload if you're very fast)")
+        _model_ready_event.wait()
+    return _embedding_model
 
 def ingest_paper(paper: ResearchPaper) -> dict:
     """
-    Splits a research paper into chunks, generates embeddings, and indexes them into Elasticsearch.
-
-    This function serves as the primary entry point for ingesting research papers into the 
-    'research_papers' index. It handles text chunking, vector embedding generation via 
-    Google Gemini, and metadata preservation.
-
-    Args:
-        paper (ResearchPaper): A dictionary containing the following keys:
-            title (str): The full title of the paper.
-            content (str): The raw text content of the paper.
-            author (str): The primary author or citation string.
-            year (int): Year of publication.
-            source_file (str): The filename of the original document (e.g., "paper.pdf").
-
-    Returns:
-        dict: A summary of the ingestion process.
-            status (str): "success" or "error".
-            chunks_indexed (int): Number of chunks successfully pushed to Elasticsearch.
-            parent_id (str): The unique identifier generated for this paper.
-
-    Example:
-        >>> from ingester import ingest_paper
-        >>> paper_data = {
-        ...     "title": "Example Paper",
-        ...     "content": "Full text here...",
-        ...     "author": "John Doe",
-        ...     "year": 2024,
-        ...     "source_file": "example.pdf"
-        ... }
-        >>> result = ingest_paper(paper_data)
-        >>> print(result)
-        {'status': 'success', 'chunks_indexed': 5, 'parent_id': '...'}
+    Splits a research paper into chunks, generates embeddings locally, and indexes them into Elasticsearch.
     """
     try:
+        # Move heavy import inside the function
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+
         # 1. Connect to local Elasticsearch
         es = Elasticsearch(
             ["http://localhost:9200"],
@@ -82,27 +68,31 @@ def ingest_paper(paper: ResearchPaper) -> dict:
         )
         index_name = "research_papers"
 
-        # 2. Generate unique parent_id (Deterministic hash of title)
+        # 2. Get the embedding model (waits if background thread isn't done yet)
+        embeddings = get_embedding_model()
+
+        # 3. Generate unique parent_id (Deterministic hash of title)
         title_hash = hashlib.md5(paper['title'].encode()).hexdigest()[:10]
         parent_id = f"paper_{title_hash}"
 
-        # 3. Initialize text splitter (500 chars, 100 overlap)
+        # 4. Initialize text splitter
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=500,
             chunk_overlap=100,
             length_function=len,
         )
 
-        # 4. Split content into chunks
+        # 5. Split content into chunks
         chunks = text_splitter.split_text(paper['content'])
+        total_chunks = len(chunks)
         
+        # 6. Generate embeddings for all chunks locally
+        print(f"[{paper['source_file']}] Generating local embeddings for {total_chunks} chunks...")
+        all_embeddings = embeddings.embed_documents(chunks)
+        
+        # 7. Index each chunk into Elasticsearch
         chunks_indexed = 0
-        for i, chunk_text in enumerate(chunks):
-            # 5. Generate embedding
-            embedding = get_embedding(chunk_text)
-            
-            # 6. Prepare and index document
-            # Use deterministic ID to prevent duplicates if script is re-run
+        for i, (chunk_text, embedding) in enumerate(zip(chunks, all_embeddings)):
             doc_id = f"{parent_id}_chunk_{i}"
             
             doc = {
@@ -120,6 +110,10 @@ def ingest_paper(paper: ResearchPaper) -> dict:
             
             es.index(index=index_name, id=doc_id, document=doc)
             chunks_indexed += 1
+            if chunks_indexed % 50 == 0:
+                print(f"[{paper['source_file']}] Indexed {chunks_indexed}/{total_chunks} chunks...")
+
+        print(f"[{paper['source_file']}] Ingestion complete. Total chunks: {chunks_indexed}")
 
         return {
             "status": "success",
@@ -128,6 +122,7 @@ def ingest_paper(paper: ResearchPaper) -> dict:
         }
 
     except Exception as e:
+        print(f"Ingestion failed: {e}")
         return {
             "status": "error",
             "message": str(e)
@@ -136,21 +131,11 @@ def ingest_paper(paper: ResearchPaper) -> dict:
 if __name__ == "__main__":
     # Example usage for testing
     test_paper: ResearchPaper = {
-        "title": "Modular Ingestion Pipeline Test",
-        "content": """
-        The goal of this pipeline is to provide a clean interface for data engineers.
-        By modularizing the ingestion process, we ensure that changes to the embedding model
-        or chunking strategy are isolated from the extraction logic.
-        
-        This multi-paragraph content will be split into multiple chunks by the RecursiveCharacterTextSplitter.
-        Each chunk will then be processed individually to generate a high-dimensional vector
-        representing its semantic meaning in the vector space.
-        """,
+        "title": "Local Ingestion Pipeline Test",
+        "content": "Sample content for testing ingestion pipeline locally.",
         "author": "System Test",
         "year": 2026,
-        "source_file": "test_pipeline.pdf"
+        "source_file": "test_local_pipeline.pdf"
     }
-    
-    print("Starting test ingestion...")
     summary = ingest_paper(test_paper)
     print(f"Ingestion Summary: {summary}")
