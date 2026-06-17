@@ -18,15 +18,18 @@ def _load_model_background():
     """Heavy initialization performed in a background thread."""
     global _embedding_model
     try:
-        # Import inside the thread to keep the main import fast
+        print("\n[Background] Starting to load embedding model and text utilities...", flush=True)
+        
+        # Heavy imports - pre-caching these in the background thread
+        # so they don't block the first request.
         from langchain_huggingface import HuggingFaceEmbeddings
-        print("\n[Background] Starting to load embedding model (all-MiniLM-L6-v2)...")
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
         
         model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         
         _embedding_model = model
         _model_ready_event.set() # Signal that the model is ready
-        print("[Background] Embedding model loaded successfully.")
+        print("[Background] Embedding model and utilities loaded successfully.")
     except Exception as e:
         print(f"[Background] Failed to load embedding model: {e}")
 
@@ -48,7 +51,7 @@ def get_embedding_model():
     If it's still loading in the background, this will wait until it's ready.
     """
     if not _model_ready_event.is_set():
-        print("Waiting for background model to finish loading... (this only happens on the first upload if you're very fast)")
+        print("Waiting for background model to finish loading... (this only happens on the first upload if you're very fast)", flush=True)
         _model_ready_event.wait()
     return _embedding_model
 
@@ -57,7 +60,7 @@ def ingest_paper(paper: ResearchPaper) -> dict:
     Splits a research paper into chunks, generates embeddings locally, and indexes them into Elasticsearch.
     """
     try:
-        # Move heavy import inside the function
+        # These are now pre-cached by the background thread
         from langchain_text_splitters import RecursiveCharacterTextSplitter
 
         # 1. Connect to local Elasticsearch
