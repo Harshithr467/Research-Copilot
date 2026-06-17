@@ -66,7 +66,7 @@ def verify_chunks():
             print(f"Content   : {content_snippet}")
             print("-" * 50)
 
-        print(f"\nTotal documents displayed: {len(hits)}")
+        print(f"\nTotal chunks displayed: {len(hits)}")
 
     except Exception as e:
         print(f"Error during verification: {e}")
