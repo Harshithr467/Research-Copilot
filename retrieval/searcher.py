@@ -2,7 +2,6 @@ import os
 from typing import TypedDict
 
 from dotenv import load_dotenv
-from elasticsearch import Elasticsearch
 from google import genai
 
 load_dotenv()
@@ -46,13 +45,10 @@ def search(
     top_k: int = 5,
     year_from: int | None = None,
     year_to: int | None = None,
-    es: Elasticsearch | None = None,
+    es: object | None = None,
 ) -> list[SearchResult]:
     """
-    Run a hybrid search (BM25 + semantic vector) over the research_papers index.
-
-    Elasticsearch's Reciprocal Rank Fusion (RRF) merges the two ranked lists
-    without needing hand-tuned weights.
+    Run a hybrid search over the research_papers index.
 
     Args:
         query:     Natural-language question or keyword string.
@@ -73,6 +69,7 @@ def search(
         raise ValueError(f"top_k must be >= 1, got {top_k}")
 
     if es is None:
+        from elasticsearch import Elasticsearch
         es = Elasticsearch(
             ["http://localhost:9200"],
             verify_certs=False,
@@ -90,7 +87,6 @@ def search(
 
     filter_clause: dict = {"bool": {"filter": filters}} if filters else {"match_all": {}}
 
-    # --- hybrid query using RRF -----------------------------------------------
     body = {
         "size": top_k,
         "_source": {"excludes": ["embedding"]},   # don't ship 768 floats back
