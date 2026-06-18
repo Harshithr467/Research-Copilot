@@ -1,25 +1,23 @@
 import re
-from typing import Any, Iterable, List, Mapping, Optional, TypedDict
+from collections.abc import Iterable, Mapping
+from typing import Any, TypedDict
 
-try:
-    from .rag_types import Citation, RetrievedChunk
-except ImportError:
-    from rag_types import Citation, RetrievedChunk
+from .models import Citation, RetrievedChunk
 
 
 FALLBACK_ANSWER = "I cannot find enough evidence in the uploaded document to answer that."
 
 
 class CitationDict(TypedDict):
-    source_file: Optional[str]
-    page_number: Optional[int]
+    source_file: str | None
+    page_number: int | None
     chunk_id: str
     quote: str
 
 
 class ValidatedCitationResponse(TypedDict):
     answer: str
-    citations: List[CitationDict]
+    citations: list[CitationDict]
 
 
 def _normalize_text(text: str) -> str:
@@ -28,9 +26,7 @@ def _normalize_text(text: str) -> str:
 
 def _quote_in_chunk(quote: str, chunk_text: str) -> bool:
     normalized_quote = _normalize_text(quote)
-    if not normalized_quote:
-        return False
-    return normalized_quote in _normalize_text(chunk_text)
+    return bool(normalized_quote) and normalized_quote in _normalize_text(chunk_text)
 
 
 def _short_quote(text: str, max_chars: int = 300) -> str:
@@ -51,10 +47,10 @@ def validate_citations(
     retrieved_chunks: Iterable[RetrievedChunk],
 ) -> ValidatedCitationResponse:
     chunks_by_id = {chunk.chunk_id: chunk for chunk in retrieved_chunks}
-    valid_citations: List[Citation] = []
+    valid_citations: list[Citation] = []
 
     raw_citations_value = llm_response.get("citations", [])
-    raw_citations: List[Any] = (
+    raw_citations: list[Any] = (
         raw_citations_value if isinstance(raw_citations_value, list) else []
     )
 
@@ -65,8 +61,9 @@ def validate_citations(
         quote_value = raw_citation.get("quote", "")
         chunk_id = chunk_id_value if isinstance(chunk_id_value, str) else None
         quote = quote_value if isinstance(quote_value, str) else None
-        if not isinstance(chunk_id, str) or not isinstance(quote, str):
+        if chunk_id is None or quote is None:
             continue
+
         chunk = chunks_by_id.get(chunk_id)
         if not chunk or not _quote_in_chunk(quote, chunk.text):
             continue
@@ -88,7 +85,7 @@ def validate_citations(
             "citations": [_dump_citation(citation) for citation in valid_citations],
         }
 
-    fallback_citations: List[Citation] = []
+    fallback_citations: list[Citation] = []
     for chunk in list(chunks_by_id.values())[:2]:
         if chunk.text:
             fallback_citations.append(

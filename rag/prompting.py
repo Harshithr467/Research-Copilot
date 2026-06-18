@@ -1,14 +1,11 @@
 import json
-from typing import Iterable
+from collections.abc import Iterable
 
-try:
-    from .rag_types import RetrievedChunk
-except ImportError:
-    from rag_types import RetrievedChunk
+from .models import RetrievedChunk
 
 
 def build_grounded_prompt(question: str, chunks: Iterable[RetrievedChunk]) -> str:
-    context_blocks = []
+    context_blocks: list[str] = []
     for chunk in chunks:
         page = chunk.page_number if chunk.page_number is not None else "unknown"
         source = chunk.source_file or "unknown"
@@ -23,7 +20,6 @@ def build_grounded_prompt(question: str, chunks: Iterable[RetrievedChunk]) -> st
             )
         )
 
-    context = "\n\n---\n\n".join(context_blocks)
     schema = {
         "answer": "Grounded answer using only the retrieved chunks, or a sentence saying there is not enough evidence.",
         "citations": [
@@ -36,7 +32,9 @@ def build_grounded_prompt(question: str, chunks: Iterable[RetrievedChunk]) -> st
         ],
     }
 
-    return f"""You are Research Copilot, a grounded assistant for a student's uploaded PDF.
+    context = "\n\n---\n\n".join(context_blocks)
+
+    return f"""You are Research Copilot, a grounded assistant for a student's uploaded document.
 
 Answer the student's question using only the retrieved document chunks below.
 Do not use outside knowledge.

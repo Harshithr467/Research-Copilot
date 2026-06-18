@@ -15,6 +15,11 @@ This document outlines the structure of the `research_papers` index used in our 
 - `metadata.author`: (Keyword) The primary author or list of authors.
 - `metadata.year`: (Integer) Publication year, used for filtering and sorting.
 - `metadata.source_file`: (Keyword) The filename or path of the original document.
+- `metadata.parent_id`: (Keyword) The uploaded document identifier used to scope retrieval.
+- `metadata.chunk_id`: (Integer) Chunk sequence number within the parent document.
+- `metadata.page_number`: (Integer, optional) Source PDF page number. This is only present when ingestion receives real page-level extraction metadata.
+
+> TODO: Exact page citations depend on upstream PDF extraction preserving page numbers. The generic raw-content ingestion path cannot infer page numbers safely, so it leaves `metadata.page_number` unset unless page records are provided.
 
 ---
 

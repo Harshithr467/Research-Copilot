@@ -1,7 +1,7 @@
-from backend.citations import FALLBACK_ANSWER, validate_citations
-from backend.prompting import build_grounded_prompt
-from backend.rag_types import RetrievedChunk
-from backend.retrieval import build_retrieval_query, extract_page_number
+from rag.citations import FALLBACK_ANSWER, validate_citations
+from rag.models import RetrievedChunk
+from rag.prompting import build_grounded_prompt
+from rag.retrieval import extract_page_number
 
 
 def test_extract_page_number_from_question():
@@ -91,21 +91,3 @@ def test_validate_citations_falls_back_when_no_valid_citations():
 
     assert validated["answer"] == FALLBACK_ANSWER
     assert validated["citations"][0]["quote"] == "Available retrieved evidence."
-
-
-def test_build_retrieval_query_hybrid_with_page_boost():
-    query = build_retrieval_query(
-        question="What happened on page 54?",
-        document_id="paper_123",
-        query_embedding=[0.1, 0.2, 0.3],
-        page_number=54,
-        top_k=5,
-    )
-
-    assert query["size"] == 5
-    assert query["query"]["bool"]["filter"] == [{"term": {"metadata.parent_id": "paper_123"}}]
-    assert query["knn"]["field"] == "embedding"
-    assert query["knn"]["query_vector"] == [0.1, 0.2, 0.3]
-    assert {"term": {"metadata.page_number": {"value": 54, "boost": 8}}} in query["query"]["bool"]["should"]
-    assert {"term": {"metadata.page_number": {"value": 53, "boost": 2}}} in query["query"]["bool"]["should"]
-    assert {"term": {"metadata.page_number": {"value": 55, "boost": 2}}} in query["query"]["bool"]["should"]

@@ -34,7 +34,8 @@ def create_research_index():
                     "year": {"type": "integer"},
                     "source_file": {"type": "keyword"},
                     "parent_id": {"type": "keyword"},
-                    "chunk_id": {"type": "integer"}
+                    "chunk_id": {"type": "integer"},
+                    "page_number": {"type": "integer"}
                 }
             }
         }

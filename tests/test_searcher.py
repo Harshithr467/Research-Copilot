@@ -150,6 +150,21 @@ def test_no_year_filter_uses_match_all(mock_gemini, mock_es):
     assert knn_leg["filter"] == {"match_all": {}}
 
 
+def test_document_id_filter_and_page_boost_are_included(mock_gemini, mock_es):
+    mock_es.search.return_value = _fake_es_response([])
+    search("what happened on page 54?", document_id="paper_123", page_number=54, es=mock_es)
+
+    body = mock_es.search.call_args.kwargs["body"]
+    standard_bool = body["retriever"]["rrf"]["retrievers"][0]["standard"]["query"]["bool"]
+    knn_filter = body["retriever"]["rrf"]["retrievers"][1]["knn"]["filter"]
+
+    assert {"term": {"metadata.parent_id": "paper_123"}} in standard_bool["filter"]
+    assert {"term": {"metadata.parent_id": "paper_123"}} in knn_filter["bool"]["filter"]
+    assert {"term": {"metadata.page_number": {"value": 54, "boost": 8}}} in standard_bool["should"]
+    assert {"term": {"metadata.page_number": {"value": 53, "boost": 2}}} in standard_bool["should"]
+    assert {"term": {"metadata.page_number": {"value": 55, "boost": 2}}} in standard_bool["should"]
+
+
 # ── validation tests ───────────────────────────────────────────────────────────
 
 def test_top_k_zero_raises_value_error(mock_gemini, mock_es):

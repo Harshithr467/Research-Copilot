@@ -1,7 +1,6 @@
 import os
 import hashlib
-import uuid
-from typing import TypedDict, List, Dict
+from typing import NotRequired, Optional, TypedDict, List, cast
 from dotenv import load_dotenv
 from elasticsearch import Elasticsearch
 from google import genai
@@ -14,6 +13,11 @@ load_dotenv()
 # Note: Using the new google-genai SDK as google-generativeai is deprecated.
 client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
+class PageRecord(TypedDict):
+    page_number: int
+    content: str
+
+
 class ResearchPaper(TypedDict):
     """Type definition for the research paper input dictionary."""
     title: str
@@ -21,6 +25,7 @@ class ResearchPaper(TypedDict):
     author: str
     year: int
     source_file: str
+    pages: NotRequired[Optional[List[PageRecord]]]
 
 def get_embedding(text: str) -> List[float]:
     """
@@ -36,7 +41,13 @@ def get_embedding(text: str) -> List[float]:
             "output_dimensionality": 768
         }
     )
-    return result.embeddings[0].values
+    embeddings = result.embeddings
+    if not embeddings:
+        raise RuntimeError("Google GenAI did not return an embedding.")
+    values = embeddings[0].values
+    if values is None:
+        raise RuntimeError("Google GenAI did not return an embedding.")
+    return cast(List[float], values)
 
 def ingest_paper(paper: ResearchPaper) -> dict:
     """
@@ -93,11 +104,27 @@ def ingest_paper(paper: ResearchPaper) -> dict:
             length_function=len,
         )
 
-        # 4. Split content into chunks
-        chunks = text_splitter.split_text(paper['content'])
+        # 4. Split content into chunks. If upstream extraction supplies
+        # page-level text, preserve real page numbers for exact citations.
+        page_records = paper.get('pages') or []
+        if page_records:
+            chunk_records = []
+            for page in page_records:
+                page_number = page.get("page_number")
+                for chunk_text in text_splitter.split_text(page.get("content", "")):
+                    chunk_records.append({
+                        "content": chunk_text,
+                        "page_number": page_number
+                    })
+        else:
+            chunk_records = [
+                {"content": chunk_text, "page_number": None}
+                for chunk_text in text_splitter.split_text(paper['content'])
+            ]
         
         chunks_indexed = 0
-        for i, chunk_text in enumerate(chunks):
+        for i, chunk_record in enumerate(chunk_records):
+            chunk_text = chunk_record["content"]
             # 5. Generate embedding
             embedding = get_embedding(chunk_text)
             
@@ -105,17 +132,21 @@ def ingest_paper(paper: ResearchPaper) -> dict:
             # Use deterministic ID to prevent duplicates if script is re-run
             doc_id = f"{parent_id}_chunk_{i}"
             
+            metadata = {
+                "author": paper['author'],
+                "year": paper['year'],
+                "source_file": paper['source_file'],
+                "parent_id": parent_id,
+                "chunk_id": i
+            }
+            if chunk_record.get("page_number") is not None:
+                metadata["page_number"] = chunk_record["page_number"]
+
             doc = {
                 "title": paper['title'],
                 "content": chunk_text,
                 "embedding": embedding,
-                "metadata": {
-                    "author": paper['author'],
-                    "year": paper['year'],
-                    "source_file": paper['source_file'],
-                    "parent_id": parent_id,
-                    "chunk_id": i
-                }
+                "metadata": metadata
             }
             
             es.index(index=index_name, id=doc_id, document=doc)

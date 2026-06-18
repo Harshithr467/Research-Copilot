@@ -1,18 +1,19 @@
 import os
-from typing import TypedDict
+from typing import Any, TypedDict, cast
 
 from dotenv import load_dotenv
-from google import genai
 
 load_dotenv()
 
 INDEX_NAME = "research_papers"
 
-_client: genai.Client | None = None
+_client: Any | None = None
 
-def _get_client() -> genai.Client:
+def _get_client() -> Any:
     global _client
     if _client is None:
+        from google import genai
+
         _client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
     return _client
 
@@ -25,6 +26,8 @@ class SearchResult(TypedDict):
     year: int
     source_file: str
     chunk_id: int
+    parent_id: str
+    page_number: int | None
 
 
 def _embed_query(text: str) -> list[float]:
@@ -36,13 +39,21 @@ def _embed_query(text: str) -> list[float]:
             "output_dimensionality": 768,
         },
     )
-    return result.embeddings[0].values
+    embeddings = result.embeddings
+    if not embeddings:
+        raise RuntimeError("Google GenAI did not return an embedding.")
+    values = embeddings[0].values
+    if values is None:
+        raise RuntimeError("Google GenAI did not return an embedding.")
+    return cast(list[float], values)
 
 
 def search(
     query: str,
     *,
     top_k: int = 5,
+    document_id: str | None = None,
+    page_number: int | None = None,
     year_from: int | None = None,
     year_to: int | None = None,
     es: object | None = None,
@@ -53,8 +64,10 @@ def search(
     Args:
         query:     Natural-language question or keyword string.
         top_k:     Number of results to return (default 5).
-        year_from: Optional lower bound on metadata.year (inclusive).
-        year_to:   Optional upper bound on metadata.year (inclusive).
+        document_id: Optional metadata.parent_id filter for one uploaded document.
+        page_number: Optional page reference to strongly boost exact/nearby pages.
+        year_from:   Optional lower bound on metadata.year (inclusive).
+        year_to:     Optional upper bound on metadata.year (inclusive).
         es:        Optional pre-built Elasticsearch client (used in tests to
                    inject a mock without touching the network).
 
@@ -80,12 +93,21 @@ def search(
 
     # --- optional year filter (applied to both legs via post_filter) ----------
     filters: list[dict] = []
+    if document_id is not None:
+        filters.append({"term": {"metadata.parent_id": document_id}})
     if year_from is not None:
         filters.append({"range": {"metadata.year": {"gte": year_from}}})
     if year_to is not None:
         filters.append({"range": {"metadata.year": {"lte": year_to}}})
 
     filter_clause: dict = {"bool": {"filter": filters}} if filters else {"match_all": {}}
+    page_boosts: list[dict] = []
+    if page_number is not None:
+        page_boosts = [
+            {"term": {"metadata.page_number": {"value": page_number, "boost": 8}}},
+            {"term": {"metadata.page_number": {"value": page_number - 1, "boost": 2}}},
+            {"term": {"metadata.page_number": {"value": page_number + 1, "boost": 2}}},
+        ]
 
     body = {
         "size": top_k,
@@ -105,6 +127,8 @@ def search(
                                         }
                                     },
                                     "filter": filters,
+                                    "should": page_boosts,
+                                    "minimum_should_match": 0,
                                 }
                             }
                         }
@@ -142,6 +166,8 @@ def search(
                 year=meta.get("year", 0),
                 source_file=meta.get("source_file", ""),
                 chunk_id=meta.get("chunk_id", 0),
+                parent_id=meta.get("parent_id", ""),
+                page_number=meta.get("page_number"),
             )
         )
 

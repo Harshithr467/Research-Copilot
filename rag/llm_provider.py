@@ -1,7 +1,7 @@
 import json
 import os
 import re
-from typing import Any, Dict, cast
+from typing import Any, cast
 
 from dotenv import load_dotenv
 
@@ -9,7 +9,7 @@ load_dotenv()
 
 
 class LLMProvider:
-    def generate_json(self, prompt: str) -> Dict[str, Any]:
+    def generate_json(self, prompt: str) -> dict[str, Any]:
         raise NotImplementedError
 
 
@@ -24,7 +24,7 @@ class GeminiProvider(LLMProvider):
         self.client = genai.Client(api_key=api_key)
         self.model = model or os.getenv("CHAT_MODEL", "gemini-2.5-flash")
 
-    def generate_json(self, prompt: str) -> Dict[str, Any]:
+    def generate_json(self, prompt: str) -> dict[str, Any]:
         response = self.client.models.generate_content(
             model=self.model,
             contents=prompt,
@@ -36,11 +36,11 @@ class GeminiProvider(LLMProvider):
         return parse_json_response(response_text)
 
 
-def parse_json_response(text: str) -> Dict[str, Any]:
+def parse_json_response(text: str) -> dict[str, Any]:
     try:
-        return cast(Dict[str, Any], json.loads(text))
+        return cast(dict[str, Any], json.loads(text))
     except json.JSONDecodeError:
         match = re.search(r"\{.*\}", text, flags=re.DOTALL)
         if not match:
             raise
-        return cast(Dict[str, Any], json.loads(match.group(0)))
+        return cast(dict[str, Any], json.loads(match.group(0)))

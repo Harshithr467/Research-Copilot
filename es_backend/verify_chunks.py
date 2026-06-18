@@ -53,11 +53,13 @@ def verify_chunks():
             
             parent_id = metadata.get('parent_id', 'N/A')
             chunk_id = metadata.get('chunk_id', 'N/A')
+            page_number = metadata.get('page_number', 'N/A')
             title = source.get('title', 'N/A')
             content_snippet = source.get('content', '')[:75].replace('\n', ' ') + "..."
 
             print(f"Parent ID : {parent_id}")
             print(f"Chunk ID  : {chunk_id}")
+            print(f"Page      : {page_number}")
             print(f"Title     : {title}")
             print(f"Content   : {content_snippet}")
             print("-" * 50)
