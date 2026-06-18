@@ -1,0 +1,52 @@
+# Research Copilot Backend
+
+This project uses Elasticsearch and LangChain to provide a research assistance backend.
+
+## Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
+- Python 3.10 or higher
+
+## Getting Started
+
+### 1. Clone the Repository
+```bash
+git clone https://github.com/Harshithr467/Research-Copilot.git
+cd Research-Copilot
+```
+
+### 2. Start Elasticsearch
+We use Docker Compose to run a local Elasticsearch instance (v8.12.0) with security disabled for development.
+
+```sh
+docker compose -f elasticsearch/docker-compose.yml up -d
+```
+*Wait a few seconds for the service to initialize.*
+
+### 3. Setup Python Environment
+Create a virtual environment and install the required dependencies:
+
+```sh
+# Create virtual environment
+python3 -m venv venv
+
+# Activate it
+source venv/bin/activate  # On Linux/macOS
+# .\venv\Scripts\activate # On Windows
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+### 4. Verify Connection
+Run the health check script to ensure everything is working correctly:
+
+```bash
+python elasticsearch/check_es_health.py
+```
+
+## Local Architecture
+- **Elasticsearch:** `http://localhost:9200`
+- **Security:** Disabled (`xpack.security.enabled=false`)
+- **Version:** 8.12.0 (Matches client library version)
+- **Configuration:** All Elasticsearch-related files are located in the `elasticsearch/` directory.
