@@ -146,8 +146,8 @@ def test_no_year_filter_uses_match_all(mock_gemini, mock_es):
     mock_es.search.return_value = _fake_es_response([])
     search("attention", es=mock_es)
     body = mock_es.search.call_args.kwargs["body"]
-    knn_leg = body["retriever"]["rrf"]["retrievers"][1]["knn"]
-    assert knn_leg["filter"] == {"match_all": {}}
+    assert body["query"]["bool"]["filter"] == []
+    assert body["knn"]["filter"] == []
 
 
 def test_document_id_filter_and_page_boost_are_included(mock_gemini, mock_es):
@@ -155,14 +155,14 @@ def test_document_id_filter_and_page_boost_are_included(mock_gemini, mock_es):
     search("what happened on page 54?", document_id="paper_123", page_number=54, es=mock_es)
 
     body = mock_es.search.call_args.kwargs["body"]
-    standard_bool = body["retriever"]["rrf"]["retrievers"][0]["standard"]["query"]["bool"]
-    knn_filter = body["retriever"]["rrf"]["retrievers"][1]["knn"]["filter"]
+    query_bool = body["query"]["bool"]
+    knn_filter = body["knn"]["filter"]
 
-    assert {"term": {"metadata.parent_id": "paper_123"}} in standard_bool["filter"]
-    assert {"term": {"metadata.parent_id": "paper_123"}} in knn_filter["bool"]["filter"]
-    assert {"term": {"metadata.page_number": {"value": 54, "boost": 8}}} in standard_bool["should"]
-    assert {"term": {"metadata.page_number": {"value": 53, "boost": 2}}} in standard_bool["should"]
-    assert {"term": {"metadata.page_number": {"value": 55, "boost": 2}}} in standard_bool["should"]
+    assert {"term": {"metadata.parent_id": "paper_123"}} in query_bool["filter"]
+    assert {"term": {"metadata.parent_id": "paper_123"}} in knn_filter
+    assert {"term": {"metadata.page_number": {"value": 54, "boost": 8}}} in query_bool["should"]
+    assert {"term": {"metadata.page_number": {"value": 53, "boost": 2}}} in query_bool["should"]
+    assert {"term": {"metadata.page_number": {"value": 55, "boost": 2}}} in query_bool["should"]
 
 
 # ── validation tests ───────────────────────────────────────────────────────────

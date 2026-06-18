@@ -1,5 +1,5 @@
 import os
-from typing import Any, TypedDict, cast
+from typing import Any, Protocol, TypedDict, cast
 
 from dotenv import load_dotenv
 
@@ -30,6 +30,11 @@ class SearchResult(TypedDict):
     page_number: int | None
 
 
+class ElasticsearchClient(Protocol):
+    def search(self, *, index: str, body: dict[str, Any]) -> dict[str, Any]:
+        ...
+
+
 def _embed_query(text: str) -> list[float]:
     result = _get_client().models.embed_content(
         model="gemini-embedding-2",
@@ -56,7 +61,7 @@ def search(
     page_number: int | None = None,
     year_from: int | None = None,
     year_to: int | None = None,
-    es: object | None = None,
+    es: ElasticsearchClient | None = None,
 ) -> list[SearchResult]:
     """
     Run a hybrid search over the research_papers index.
@@ -83,10 +88,13 @@ def search(
 
     if es is None:
         from elasticsearch import Elasticsearch
-        es = Elasticsearch(
+        es = cast(
+            ElasticsearchClient,
+            Elasticsearch(
             ["http://localhost:9200"],
             verify_certs=False,
             request_timeout=30,
+            ),
         )
 
     query_vector = _embed_query(query)
@@ -100,7 +108,6 @@ def search(
     if year_to is not None:
         filters.append({"range": {"metadata.year": {"lte": year_to}}})
 
-    filter_clause: dict = {"bool": {"filter": filters}} if filters else {"match_all": {}}
     page_boosts: list[dict] = []
     if page_number is not None:
         page_boosts = [
@@ -112,41 +119,25 @@ def search(
     body = {
         "size": top_k,
         "_source": {"excludes": ["embedding"]},   # don't ship 768 floats back
-        "retriever": {
-            "rrf": {
-                "retrievers": [
-                    # Leg 1: BM25 keyword search across title + content
-                    {
-                        "standard": {
-                            "query": {
-                                "bool": {
-                                    "must": {
-                                        "multi_match": {
-                                            "query": query,
-                                            "fields": ["title^2", "content"],
-                                        }
-                                    },
-                                    "filter": filters,
-                                    "should": page_boosts,
-                                    "minimum_should_match": 0,
-                                }
-                            }
-                        }
-                    },
-                    # Leg 2: kNN semantic vector search
-                    {
-                        "knn": {
-                            "field": "embedding",
-                            "query_vector": query_vector,
-                            "num_candidates": 100,
-                            "k": top_k,
-                            "filter": filter_clause,
-                        }
-                    },
-                ],
-                "rank_window_size": 50,
-                "rank_constant": 60,
+        "query": {
+            "bool": {
+                "must": {
+                    "multi_match": {
+                        "query": query,
+                        "fields": ["title^2", "content"],
+                    }
+                },
+                "filter": filters,
+                "should": page_boosts,
+                "minimum_should_match": 0,
             }
+        },
+        "knn": {
+            "field": "embedding",
+            "query_vector": query_vector,
+            "num_candidates": 100,
+            "k": top_k,
+            "filter": filters,
         },
     }
 
