@@ -87,6 +87,113 @@ function ChatProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// ── Sidebar 
+function Sidebar() {
+  const { chats, activeChatId, createChat, switchChat } = useChatCtx();
+  return (
+    <aside className="sidebar">
+      <div className="sidebar-header">
+        <div className="sidebar-brand"><BookOpen size={18} strokeWidth={1.5} /><span>ResearchBot</span></div>
+        <button className="btn-new-chat" onClick={createChat}><Plus size={15} />New chat</button>
+      </div>
+      <div className="chat-section-label">Chats</div>
+      <nav className="chat-list">
+        {chats.length === 0 && <p className="chat-list-empty">No chats yet.</p>}
+        {chats.map(chat => (
+          <button key={chat.id} className={`chat-item ${chat.id === activeChatId ? "active" : ""}`} onClick={() => switchChat(chat.id)}>
+            <MessageSquare size={13} strokeWidth={1.5} className="chat-item-icon" />
+            <span className="chat-item-title">{chat.title}</span>
+            <span className="chat-item-meta">{chat.docs.length} doc{chat.docs.length !== 1 ? "s" : ""}</span>
+          </button>
+        ))}
+      </nav>
+    </aside>
+  );
+}
+
+// Topbar 
+function Topbar() {
+  const { activeChat } = useChatCtx();
+  return (
+    <div className="topbar">
+      <span className={`topbar-title ${!activeChat ? "muted" : ""}`}>
+        {activeChat ? activeChat.title : "Select or start a chat"}
+      </span>
+      <div className="doc-chips">
+        {activeChat?.docs.length === 0 && <span className="no-docs-hint">No documents attached yet</span>}
+        {activeChat?.docs.map((doc, i) => (
+          <span key={i} className="doc-chip"><FileText size={11} strokeWidth={1.5} />{doc.name}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Messages ───────────────────────────────────────────────────────────────
+function MessageList() {
+  const { activeChat, isLoading } = useChatCtx();
+  const bottomRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [activeChat?.messages, isLoading]);
+
+  if (!activeChat || activeChat.messages.length === 0) return (
+    <div className="messages-empty">
+      <div className="empty-card">
+        <h2>{activeChat ? activeChat.title : "Research Assistant"}</h2>
+        <p>{activeChat ? "Upload a document below and ask your first question." : "Start a new chat, upload your papers, and ask questions.Answers will be grounded strictly in your documents."}</p>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="message-list">
+      {activeChat.messages.map(msg => {
+        if (msg.role === "user") return (
+          <div key={msg.id} className="msg-row user">
+            <div className="msg-avatar user">Y</div>
+            <div className="msg-bubble user">{msg.text}</div>
+          </div>
+        );
+        if (msg.insufficient) return (
+          <div key={msg.id} className="msg-row bot">
+            <div className="msg-avatar bot"><AlertTriangle size={14} strokeWidth={1.5} /></div>
+            <div className="msg-content">
+              <div className="msg-bubble insufficient">
+                <strong>Not enough context in your documents.</strong>
+                <p>The uploaded papers don&apos;t contain enough information. Try uploading a more relevant document.</p>
+              </div>
+            </div>
+          </div>
+        );
+        return (
+          <div key={msg.id} className="msg-row bot">
+            <div className="msg-avatar bot"><Bot size={14} strokeWidth={1.5} /></div>
+            <div className="msg-content">
+              <div className="msg-bubble bot">{msg.answer}</div>
+              {msg.citations && msg.citations.length > 0 && (
+                <div className="citations">
+                  {msg.citations.map(c => (
+                    <div key={c.id} className="citation-item">
+                      <span className="citation-badge">[{c.id}]</span>
+                      <FileText size={12} strokeWidth={1.5} />
+                      {c.doc} · Page {c.page}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+      {isLoading && (
+        <div className="msg-row bot">
+          <div className="msg-avatar bot"><Bot size={14} strokeWidth={1.5} /></div>
+          <div className="msg-bubble bot typing-bubble"><span /><span /><span /></div>
+        </div>
+      )}
+      <div ref={bottomRef} />
+    </div>
+  );
+}
 
 // Input bar 
 function InputBar() {
