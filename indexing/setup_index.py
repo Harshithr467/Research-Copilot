@@ -23,7 +23,7 @@ def create_research_index():
             },
             "embedding": {
                 "type": "dense_vector",
-                "dims": 768,
+                "dims": 384,
                 "index": True,
                 "similarity": "cosine"
             },
