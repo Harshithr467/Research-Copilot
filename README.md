@@ -1,95 +1,95 @@
-<<<<<<< HEAD
-# Research-Copilot
-A chatbot where users can upload research articles they’ve found on their own. A combination of ElasticSearch and LLM. The LLM will respond to user queries with information strictly from the uploaded documents. If it can’t find enough information, we won’t answer the user’s query and request more context. The chatbot response may include citations or point the user to the location from the information was found. The user has the option to start multiple difference chats for different topics. \ 
+# Research Copilot
 
-HOW TO RUN: 
-```
-npm install
-npm run dev
-```
-Click on Local Host website created 
+Research Copilot is a full-stack AI-powered research assistant. It allows users to upload research articles (PDFs, DOCX, TXT, MD), extracts and indexes their contents into a local Elasticsearch vector database using local embeddings (via Hugging Face `all-MiniLM-L6-v2`), and enables chatting with the documents using Google Gemini models. The backend will query the vector database and provide answers grounded strictly in the context of the uploaded documents.
 
-Side Bar and Messages is pending
+---
 
-=======
-# Research Copilot Backend
+## Architecture Overview
 
-This project uses Elasticsearch and LangChain to provide a research assistance backend.
+The system consists of three main components:
+1. **Frontend (Next.js):** A modern React-based user interface styled with Tailwind CSS, running at `http://localhost:3000`.
+2. **Backend (FastAPI):** A high-performance API server running at `http://localhost:8000`. It processes document uploads, runs text extraction pipelines, performs metadata extraction using Gemini, and handles semantic retrieval.
+3. **Database (Elasticsearch):** A search engine running at `http://localhost:9200` to index text chunks and their corresponding 384-dimensional dense vectors.
+
+---
 
 ## Prerequisites
 
-- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
-- Python 3.10 or higher
+Before starting, ensure you have the following installed on your machine:
+- **Docker & Docker Compose** (for running Elasticsearch)
+- **Node.js** (v18+ recommended)
+- **Python 3** (3.10+ recommended)
+- **Virtual Environment Tool** (e.g., `venv` package)
 
-## Getting Started
+In addition, you will need a Google Gemini API Key configured in your environment.
 
-### 1. Clone the Repository
-```bash
-git clone https://github.com/Harshithr467/Research-Copilot.git
-cd Research-Copilot
+---
+
+## Setup Instructions
+
+Follow these steps to set up and run the entire stack.
+
+### 1. Environment Setup
+
+Create a `.env` file in the root directory and add your Google Gemini API key:
+```env
+GOOGLE_API_KEY=your_gemini_api_key_here
 ```
 
-### 2. Start Elasticsearch
-We use Docker Compose to run a local Elasticsearch instance (v8.12.0) with security disabled for development.
+### 2. Infrastructure Setup (Elasticsearch)
 
-```sh
+Start the local Elasticsearch instance using Docker Compose:
+
+```bash
 docker compose -f indexing/docker-compose.yml up -d
 ```
-*Wait a few seconds for the service to initialize.*
 
-### 3. Setup Python Environment
-Create a virtual environment and install the required dependencies:
+> [!WARNING]
+> **Initialize the Index Only Once:**
+> Run the setup script to create the index schema and map the 384-dimensional vector field. **Do not run this script repeatedly**, as running it again will delete the existing index and wipe all your uploaded documents.
+>
+> To initialize the index, run:
+> ```bash
+> # Make sure your Python environment is active (see Backend Setup below)
+> python3 indexing/setup_index.py
+> ```
 
-```sh
-# Create virtual environment
+### 3. Backend Setup
+
+Set up the Python virtual environment and install the required backend dependencies:
+
+```bash
+# 1. Create the virtual environment
 python3 -m venv venv
 
-# Activate it
+# 2. Activate the virtual environment
 source venv/bin/activate  # On Linux/macOS
 # .\venv\Scripts\activate # On Windows
 
-# Install dependencies
+# 3. Install requirements
 pip install -r requirements.txt
 ```
 
-### 4. Verify Connection
-Run the health check script to ensure everything is working correctly:
+### 4. Frontend Setup
+
+Install the Node.js packages and dependencies for the Next.js frontend:
 
 ```bash
-python indexing/check_es_health.py
+npm install
 ```
 
-## Local Architecture
-- **Elasticsearch:** `http://localhost:9200`
-- **Security:** Disabled (`xpack.security.enabled=false`)
-- **Version:** 8.12.0 (Matches client library version)
+---
 
-## Backend API Server
-To run the local API server for testing uploads:
+## Running the Application
 
-1.  Ensure your virtual environment is active.
-2.  Run `pip install -r requirements.txt` to get the latest server libraries.
-3.  Start the server by running: `uvicorn api_server:app --reload`
-4.  Open your browser and navigate to `http://localhost:8000/docs` to use the interactive upload UI.
-
-The endpoint for PDF uploads is `POST /upload-pdf`. Uploaded files are stored in the `uploaded_files/` directory, and text is automatically extracted using the `extraction` module.
-
-- **Configuration:** All Elasticsearch-related files are located in the `indexing/` directory.
-- **Extraction:** PDF and DOCX text extraction logic is in the `extraction/` directory.
-
-## Embedding & Indexing Strategy
-
-### Local Embeddings (No Rate Limits)
-The ingestion pipeline has been optimized to use a local, open-source embedding model (**all-MiniLM-L6-v2**) via `langchain-huggingface`. 
-- **Bypasses API Quotas:** Unlike the Google GenAI API, there are no rate limits (e.g., 100 RPM) or costs for indexing.
-- **Dimensions:** This model produces **384-dimensional** vectors.
-- **Background Loading:** The model is initialized in a separate thread when the server starts. This allows the API server to be available **instantly**, while the heavy model loading happens in the background. If you attempt an upload before loading is complete, the process will gracefully wait for the model to be ready.
-
-### Index Configuration
-If you are setting up the index for the first time or moving from the previous 768-dim model, you **must** re-run the index setup script to align with the 384-dim mapping:
+Once the steps above are completed, you can start both the Next.js frontend and the FastAPI backend concurrently using a single command:
 
 ```bash
-# Re-create the index with 384 dimensions
-python3 indexing/setup_index.py
+npm run dev
 ```
->>>>>>> main
+
+This runs:
+- The Next.js development server at [http://localhost:3000](http://localhost:3000)
+- The FastAPI API server with hot-reload enabled at [http://localhost:8000](http://localhost:8000)
+
+Open your browser and navigate to [http://localhost:3000](http://localhost:3000) to begin using Research Copilot.

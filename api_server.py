@@ -3,6 +3,7 @@ import shutil
 import time
 from typing import List
 from fastapi import FastAPI, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from contextlib import asynccontextmanager
 from google import genai
@@ -35,6 +36,15 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title="Research-Copilot API", lifespan=lifespan)
+
+# Enable CORS for frontend integration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 def extract_metadata_with_llm(text: str, filename: str) -> PaperMetadata:
     """

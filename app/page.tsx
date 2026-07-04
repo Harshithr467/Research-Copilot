@@ -24,8 +24,25 @@ async function queryDocuments(_query: string) {
   return MOCKS[mockIdx++ % MOCKS.length];
 }
 async function uploadDocument(file: File): Promise<Doc> {
-  await new Promise(r => setTimeout(r, 400));
-  return { name: file.name, pages: Math.floor(Math.random() * 20) + 3 };
+  const backendUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await fetch(`${backendUrl}/upload-pdf`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!res.ok) {
+    throw new Error(`Upload failed: ${res.statusText}`);
+  }
+
+  const data = await res.json();
+  if (data.status === "error") {
+    throw new Error(data.message || "Upload failed");
+  }
+
+  return { name: data.filename || file.name, pages: 1 };
 }
 
 // ── State (Context) ────────────────────────────────────────────────────────
