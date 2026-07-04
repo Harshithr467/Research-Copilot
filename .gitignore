@@ -5,3 +5,10 @@ node_modules/
 .env.local
 .env*.local
 html/
+
+
+# Ignore virtual environments
+venv/
+
+# Ignore compiled python files
+__pycache__/
