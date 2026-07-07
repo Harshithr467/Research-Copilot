@@ -1,18 +1,20 @@
 import os
 import shutil
 import time
-from typing import List
+from typing import List, Optional
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.concurrency import run_in_threadpool
 import uvicorn
 from contextlib import asynccontextmanager
 from google import genai
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-# Import real extraction and ingestion functions
+# Import real extraction, ingestion, and retrieval functions
 from extraction.extractor import extract
 from indexing.ingester import ingest_paper, ResearchPaper
+from retrieval.searcher import search
 
 # Load environment variables
 load_dotenv()
@@ -24,6 +26,21 @@ class PaperMetadata(BaseModel):
     title: str
     author: str
     year: int
+
+class ChatRequest(BaseModel):
+    query: str
+    top_k: int = 5
+
+class CitationOut(BaseModel):
+    id: int
+    doc: str
+
+    page: int
+
+class ChatAnswer(BaseModel):
+    answer: Optional[str]
+    citations: List[CitationOut]
+    insufficient: bool
 
 UPLOAD_DIR = "uploaded_files"
 
@@ -84,6 +101,85 @@ async def root():
         "docs": "Visit /docs for the interactive API documentation",
         "status": "online"
     }
+
+def generate_grounded_answer(query: str, results: List[dict]) -> ChatAnswer:
+    """
+    Given retrieved chunks, ask gemini-2.5-flash to produce an answer that is
+    grounded ONLY in those chunks, with citations mapped back to the chunk
+    numbers we gave it. Retries a few times on transient API errors, same
+    pattern as extract_metadata_with_llm above.
+    """
+    context_blocks = [
+        f"[{i}] (source: {r['source_file']}, chunk {r['chunk_id']})\n{r['content']}"
+        for i, r in enumerate(results, start=1)
+    ]
+    context = "\n\n".join(context_blocks)
+
+    prompt = f"""
+    You are a research assistant. Answer the user's question using ONLY the
+    numbered context excerpts below - do not use outside knowledge.
+
+    Cite every claim inline using the excerpt number it came from, e.g. [1].
+    In your structured "citations" output, each entry's "id" must be one of
+    the excerpt numbers above, and "doc" must be copied exactly from that
+    excerpt's "source" value.
+
+    If the excerpts do not contain enough information to answer the
+    question, set "insufficient" to true and "answer" to null.
+
+    Question: {query}
+
+    Context:
+    {context}
+    """
+
+    last_error: Exception | None = None
+    for _ in range(3):
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config={
+                    "response_mime_type": "application/json",
+                    "response_schema": ChatAnswer,
+                },
+            )
+            parsed: ChatAnswer = response.parsed
+
+           
+            fixed_citations: List[CitationOut] = []
+            for c in parsed.citations:
+                idx = c.id - 1
+                if 0 <= idx < len(results):
+                    fixed_citations.append(CitationOut(
+                        id=c.id,
+                        doc=results[idx]["source_file"],
+                        page=results[idx]["chunk_id"],
+                    ))
+            parsed.citations = fixed_citations
+            return parsed
+        except Exception as e:
+            last_error = e
+            print(f"Chat LLM error: {e}. Retrying in 3 seconds...")
+            time.sleep(3)
+
+    # If the LLM call kept failing, fail safe rather than crash the request.
+    print(f"Chat LLM permanently failed: {last_error}")
+    return ChatAnswer(answer=None, citations=[], insufficient=True)
+
+@app.post("/chat", response_model=ChatAnswer)
+async def chat(req: ChatRequest):
+    """
+    Search the index for relevant chunks, then generate a grounded answer
+    with citations. Runs the (blocking) search + embedding call in a
+    threadpool so it doesn't block the event loop.
+    """
+    results = await run_in_threadpool(search, req.query, top_k=req.top_k)
+
+    if not results:
+        return ChatAnswer(answer=None, citations=[], insufficient=True)
+
+    return await run_in_threadpool(generate_grounded_answer, req.query, results)
 
 @app.post("/upload-pdf")
 async def upload_pdf(file: UploadFile = File(...)):
