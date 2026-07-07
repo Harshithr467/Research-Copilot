@@ -1,20 +1,13 @@
-import os
 from typing import TypedDict
 
 from dotenv import load_dotenv
-from google import genai
+
+
+from indexing.ingester import get_embedding_model
 
 load_dotenv()
 
 INDEX_NAME = "research_papers"
-
-_client: genai.Client | None = None
-
-def _get_client() -> genai.Client:
-    global _client
-    if _client is None:
-        _client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
-    return _client
 
 
 class SearchResult(TypedDict):
@@ -28,15 +21,14 @@ class SearchResult(TypedDict):
 
 
 def _embed_query(text: str) -> list[float]:
-    result = _get_client().models.embed_content(
-        model="gemini-embedding-2",
-        contents=text,
-        config={
-            "task_type": "retrieval_query",
-            "output_dimensionality": 768,
-        },
-    )
-    return result.embeddings[0].values
+    """
+    Embed a query using the same local all-MiniLM-L6-v2 model used to embed
+    documents at ingestion time (see indexing/ingester.py). This blocks until
+    the background model-loading thread in ingester.py has finished, if it
+    hasn't already.
+    """
+    model = get_embedding_model()
+    return model.embed_query(text)
 
 
 def search(
@@ -89,7 +81,7 @@ def search(
 
     body = {
         "size": top_k,
-        "_source": {"excludes": ["embedding"]},   # don't ship 768 floats back
+        "_source": {"excludes": ["embedding"]},   # don't ship the raw vector back
         "retriever": {
             "rrf": {
                 "retrievers": [

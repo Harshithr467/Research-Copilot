@@ -43,22 +43,18 @@ def _fake_hit(
 
 @pytest.fixture()
 def fake_embedding():
-    return [0.0] * 768
+    # 384-dim to match the all-MiniLM-L6-v2 model used at ingestion time
+    # and the "dims": 384 mapping in indexing/setup_index.py.
+    return [0.0] * 384
 
 
 @pytest.fixture()
-def mock_gemini(fake_embedding):
-    embedding_obj = MagicMock()
-    embedding_obj.values = fake_embedding
+def mock_embedder(fake_embedding):
+    mock_model = MagicMock()
+    mock_model.embed_query.return_value = fake_embedding
 
-    result_obj = MagicMock()
-    result_obj.embeddings = [embedding_obj]
-
-    mock_client = MagicMock()
-    mock_client.models.embed_content.return_value = result_obj
-
-    with patch("retrieval.searcher._get_client", return_value=mock_client):
-        yield mock_client
+    with patch("retrieval.searcher.get_embedding_model", return_value=mock_model):
+        yield mock_model
 
 
 @pytest.fixture()
@@ -68,7 +64,7 @@ def mock_es():
 
 # ── happy-path tests ───────────────────────────────────────────────────────────
 
-def test_search_returns_correct_number_of_results(mock_gemini, mock_es):
+def test_search_returns_correct_number_of_results(mock_embedder, mock_es):
     mock_es.search.return_value = _fake_es_response(
         [_fake_hit(title=f"Paper {i}", chunk_id=i) for i in range(3)]
     )
@@ -76,7 +72,7 @@ def test_search_returns_correct_number_of_results(mock_gemini, mock_es):
     assert len(results) == 3
 
 
-def test_search_result_fields_are_mapped_correctly(mock_gemini, mock_es):
+def test_search_result_fields_are_mapped_correctly(mock_embedder, mock_es):
     mock_es.search.return_value = _fake_es_response(
         [_fake_hit(title="Gaussian Splatting", content="Dense scene rep.", score=0.92,
                    author="Kerbl et al.", year=2023, source_file="kerbl.pdf", chunk_id=1)]
@@ -92,28 +88,41 @@ def test_search_result_fields_are_mapped_correctly(mock_gemini, mock_es):
     assert r["chunk_id"] == 1
 
 
-def test_search_uses_retrieval_query_task_type(mock_gemini, mock_es):
+def test_search_embeds_query_with_shared_local_model(mock_embedder, mock_es):
+    """
+    The query text must be embedded with the *same* model instance used at
+    ingestion time (indexing/ingester.get_embedding_model), not a separate
+    embedding backend, or query vectors and document vectors will live in
+    different spaces.
+    """
     mock_es.search.return_value = _fake_es_response([])
     search("attention mechanisms", es=mock_es)
-    call_kwargs = mock_gemini.models.embed_content.call_args
-    config = call_kwargs.kwargs.get("config") or call_kwargs.args[2]
-    assert config["task_type"] == "retrieval_query"
+    mock_embedder.embed_query.assert_called_once_with("attention mechanisms")
 
 
-def test_search_excludes_embedding_from_response(mock_gemini, mock_es):
+def test_search_sends_query_vector_matching_index_dims(mock_embedder, mock_es, fake_embedding):
+    mock_es.search.return_value = _fake_es_response([])
+    search("attention mechanisms", es=mock_es)
+    body = mock_es.search.call_args.kwargs["body"]
+    knn_leg = body["retriever"]["rrf"]["retrievers"][1]["knn"]
+    assert knn_leg["query_vector"] == fake_embedding
+    assert len(knn_leg["query_vector"]) == 384
+
+
+def test_search_excludes_embedding_from_response(mock_embedder, mock_es):
     mock_es.search.return_value = _fake_es_response([])
     search("transformers", es=mock_es)
     body = mock_es.search.call_args.kwargs["body"]
     assert "embedding" in body["_source"]["excludes"]
 
 
-def test_search_empty_index_returns_empty_list(mock_gemini, mock_es):
+def test_search_empty_index_returns_empty_list(mock_embedder, mock_es):
     mock_es.search.return_value = _fake_es_response([])
     results = search("anything", es=mock_es)
     assert results == []
 
 
-def test_search_results_ordered_by_score(mock_gemini, mock_es):
+def test_search_results_ordered_by_score(mock_embedder, mock_es):
     mock_es.search.return_value = _fake_es_response([
         _fake_hit(title="Best", score=0.99, chunk_id=0),
         _fake_hit(title="Middle", score=0.75, chunk_id=1),
@@ -126,7 +135,7 @@ def test_search_results_ordered_by_score(mock_gemini, mock_es):
 
 # ── year filter tests ──────────────────────────────────────────────────────────
 
-def test_year_from_is_included_in_query_body(mock_gemini, mock_es):
+def test_year_from_is_included_in_query_body(mock_embedder, mock_es):
     mock_es.search.return_value = _fake_es_response([])
     search("transformers", year_from=2023, es=mock_es)
     body = mock_es.search.call_args.kwargs["body"]
@@ -134,7 +143,7 @@ def test_year_from_is_included_in_query_body(mock_gemini, mock_es):
     assert "2023" in str(body)
 
 
-def test_year_to_is_included_in_query_body(mock_gemini, mock_es):
+def test_year_to_is_included_in_query_body(mock_embedder, mock_es):
     mock_es.search.return_value = _fake_es_response([])
     search("diffusion models", year_to=2024, es=mock_es)
     body = mock_es.search.call_args.kwargs["body"]
@@ -142,7 +151,7 @@ def test_year_to_is_included_in_query_body(mock_gemini, mock_es):
     assert "2024" in str(body)
 
 
-def test_no_year_filter_uses_match_all(mock_gemini, mock_es):
+def test_no_year_filter_uses_match_all(mock_embedder, mock_es):
     mock_es.search.return_value = _fake_es_response([])
     search("attention", es=mock_es)
     body = mock_es.search.call_args.kwargs["body"]
@@ -152,11 +161,11 @@ def test_no_year_filter_uses_match_all(mock_gemini, mock_es):
 
 # ── validation tests ───────────────────────────────────────────────────────────
 
-def test_top_k_zero_raises_value_error(mock_gemini, mock_es):
+def test_top_k_zero_raises_value_error(mock_embedder, mock_es):
     with pytest.raises(ValueError, match="top_k"):
         search("anything", top_k=0, es=mock_es)
 
 
-def test_top_k_negative_raises_value_error(mock_gemini, mock_es):
+def test_top_k_negative_raises_value_error(mock_embedder, mock_es):
     with pytest.raises(ValueError, match="top_k"):
         search("anything", top_k=-1, es=mock_es)
