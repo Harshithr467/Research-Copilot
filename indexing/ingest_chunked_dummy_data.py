@@ -1,28 +1,17 @@
-import os
 import time
-from typing import List, Dict
+from typing import List, cast
 from dotenv import load_dotenv
 from elasticsearch import Elasticsearch
-from google import genai
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+from indexing.ingester import get_embedding_model
 
 # Load environment variables
 load_dotenv()
 
-# Configure Google GenAI Client
-client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
-
 def get_embedding(text: str) -> List[float]:
     """Generate vector embedding for a given text chunk."""
-    result = client.models.embed_content(
-        model="gemini-embedding-2",
-        contents=text,
-        config={
-            "task_type": "retrieval_document",
-            "output_dimensionality": 768
-        }
-    )
-    return result.embeddings[0].values
+    return cast(List[float], get_embedding_model().embed_query(text))
 
 def ingest_data():
     # Initialize Elasticsearch client
@@ -43,12 +32,12 @@ def ingest_data():
             "year": 2023,
             "source_file": "kerbl_2023.pdf",
             "content": """
-            Radiance Field methods have recently revolutionized photorealistic synthesis of scenes captured with a handful of photos or videos. 
-            However, achieving high visual quality still requires neural networks that are costly to train and render, while recent faster methods inevitably trade off visual quality for speed. 
+            Radiance Field methods have recently revolutionized photorealistic synthesis of scenes captured with a handful of photos or videos.
+            However, achieving high visual quality still requires neural networks that are costly to train and render, while recent faster methods inevitably trade off visual quality for speed.
             We introduce three key elements that allow us to achieve state-of-the-art visual quality while maintaining competitive training times and importantly allow high-quality real-time (>= 30 fps) novel-view synthesis at 1080p resolution.
 
-            First, starting from sparse points produced during camera calibration, we represent the scene with 3D Gaussians that preserve desirable properties of continuous volumetric radiance fields for scene optimization while avoiding unnecessary computation in empty space. 
-            Second, we perform interleaved optimization/density control of the 3D Gaussians, notably optimizing anisotropic covariance to create an accurate representation of the scene. 
+            First, starting from sparse points produced during camera calibration, we represent the scene with 3D Gaussians that preserve desirable properties of continuous volumetric radiance fields for scene optimization while avoiding unnecessary computation in empty space.
+            Second, we perform interleaved optimization/density control of the 3D Gaussians, notably optimizing anisotropic covariance to create an accurate representation of the scene.
             Third, we develop a fast GPU-based tile-based rasterizer that allows real-time rendering and significantly speeds up optimization.
             """
         },
@@ -59,12 +48,12 @@ def ingest_data():
             "year": 2024,
             "source_file": "quality_metrics_study.pdf",
             "content": """
-            Evaluating the perceptual quality of generated images is a critical task in computer vision. 
+            Evaluating the perceptual quality of generated images is a critical task in computer vision.
             Traditional metrics like Peak Signal-to-Noise Ratio (PSNR) and Structural Similarity Index (SSIM) often fail to capture human-like judgment of image quality, especially in the context of deep learning-based synthesis.
             Multi-Scale Structural Similarity (MS-SSIM) attempts to improve upon SSIM by evaluating image quality at multiple scales, but it still struggles with texture-heavy or highly detailed synthetic images.
 
-            The Learned Perceptual Image Patch Similarity (LPIPS) metric has emerged as a powerful alternative. 
-            By leveraging deep neural network activations, LPIPS provides a distance measure that correlates much better with human perception. 
+            The Learned Perceptual Image Patch Similarity (LPIPS) metric has emerged as a powerful alternative.
+            By leveraging deep neural network activations, LPIPS provides a distance measure that correlates much better with human perception.
             This study compares LPIPS and MS-SSIM across various datasets, including 3D Gaussian Splatting results, to determine which metric better aligns with visual fidelity in neural rendering tasks.
             """
         },
@@ -75,12 +64,12 @@ def ingest_data():
             "year": 2025,
             "source_file": "neural_rendering_2025.pdf",
             "content": """
-            Neural rendering has seen rapid growth, with a focus on improving both speed and visual fidelity. 
-            One of the key challenges remains the optimization of these models using loss functions that reflect human visual systems. 
+            Neural rendering has seen rapid growth, with a focus on improving both speed and visual fidelity.
+            One of the key challenges remains the optimization of these models using loss functions that reflect human visual systems.
             Recent work has integrated perceptual losses like LPIPS directly into the training loops of 3D Gaussian Splatting architectures.
 
-            By incorporating multi-scale perceptual feedback, we can guide the optimization of Gaussian primitives to better represent complex textures and lighting effects. 
-            Furthermore, the use of MS-SSIM as a complementary loss component helps maintain structural integrity. 
+            By incorporating multi-scale perceptual feedback, we can guide the optimization of Gaussian primitives to better represent complex textures and lighting effects.
+            Furthermore, the use of MS-SSIM as a complementary loss component helps maintain structural integrity.
             Our experiments show that a hybrid loss function combining LPIPS, MS-SSIM, and L1 loss leads to significantly more realistic novel-view synthesis with fewer artifacts.
             """
         }
@@ -97,14 +86,14 @@ def ingest_data():
 
     for paper in papers:
         print(f"Processing: {paper['title']}")
-        
+
         # Split text into chunks
         chunks = text_splitter.split_text(paper['content'])
-        
+
         for i, chunk_text in enumerate(chunks):
             # Generate embedding
             embedding = get_embedding(chunk_text)
-            
+
             # Use deterministic ID to prevent duplicates
             doc_id = f"{paper['id']}_chunk_{i}"
 
@@ -121,11 +110,11 @@ def ingest_data():
                     "chunk_id": i
                 }
             }
-            
+
             # Index into Elasticsearch with explicit ID
             es.index(index=index_name, id=doc_id, document=doc)
             total_chunks += 1
-            
+
         # Small delay to respect potential rate limits
         time.sleep(1)
 

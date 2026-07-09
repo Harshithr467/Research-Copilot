@@ -104,7 +104,7 @@ def test_search_sends_query_vector_matching_index_dims(mock_embedder, mock_es, f
     mock_es.search.return_value = _fake_es_response([])
     search("attention mechanisms", es=mock_es)
     body = mock_es.search.call_args.kwargs["body"]
-    knn_leg = body["retriever"]["rrf"]["retrievers"][1]["knn"]
+    knn_leg = body["knn"]
     assert knn_leg["query_vector"] == fake_embedding
     assert len(knn_leg["query_vector"]) == 384
 
@@ -155,8 +155,19 @@ def test_no_year_filter_uses_match_all(mock_embedder, mock_es):
     mock_es.search.return_value = _fake_es_response([])
     search("attention", es=mock_es)
     body = mock_es.search.call_args.kwargs["body"]
-    knn_leg = body["retriever"]["rrf"]["retrievers"][1]["knn"]
-    assert knn_leg["filter"] == {"match_all": {}}
+    assert body["query"]["bool"]["filter"] == []
+    assert "filter" not in body["knn"]
+
+
+def test_search_does_not_add_page_number_boosts(mock_embedder, mock_es):
+    mock_es.search.return_value = _fake_es_response([])
+    search("what happened on page 54?", es=mock_es)
+
+    body = mock_es.search.call_args.kwargs["body"]
+    query_bool = body["query"]["bool"]
+
+    assert "should" not in query_bool
+    assert "metadata.page_number" not in str(body)
 
 
 # ── validation tests ───────────────────────────────────────────────────────────

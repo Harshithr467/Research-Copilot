@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import time
 from typing import List, Optional
@@ -34,7 +35,6 @@ class ChatRequest(BaseModel):
 class CitationOut(BaseModel):
     id: int
     doc: str
-
     page: int
 
 class ChatAnswer(BaseModel):
@@ -71,11 +71,12 @@ def extract_metadata_with_llm(text: str, filename: str) -> PaperMetadata:
     Extract the title, primary author, and publication year from the following research paper text.
     If multiple authors exist, combine them into a single string.
     If the publication year is not found, return 0.
-    
+
     Text:
     {text[:4000]}
     """
 
+    last_error: Exception | None = None
     for _ in range(3):
         try:
             response = client.models.generate_content(
@@ -88,10 +89,79 @@ def extract_metadata_with_llm(text: str, filename: str) -> PaperMetadata:
             )
             return response.parsed
         except Exception as e:
+            last_error = e
             print(f"API Error/Rate Limit: {e}. Retrying in 5 seconds...")
             time.sleep(5)
-    
-    raise e
+
+    raise RuntimeError("Metadata extraction failed after 3 attempts") from last_error
+
+
+def requested_citation_style(query: str) -> Optional[str]:
+    """Detect whether the user explicitly asked for APA or MLA formatting."""
+    lowered = query.lower()
+    if re.search(r"\bapa\b", lowered):
+        return "APA"
+    if re.search(r"\bmla\b", lowered):
+        return "MLA"
+    return None
+
+
+def _safe_author(result: dict) -> str:
+    author = str(result.get("author") or "").strip()
+    return author if author else "Unknown Author"
+
+
+def _safe_year(result: dict) -> str:
+    year = result.get("year")
+    return str(year) if isinstance(year, int) and year > 0 else "n.d."
+
+
+def _safe_title(result: dict) -> str:
+    title = str(result.get("title") or "").strip()
+    return title if title else str(result.get("source_file") or "Uploaded document")
+
+
+def _safe_source(result: dict) -> str:
+    source = str(result.get("source_file") or "").strip()
+    return source if source else "uploaded document"
+
+
+def format_location(result: dict, style: str) -> str:
+    """
+    Format the exact retrieved location. The current index stores chunk IDs, not
+    reliable page numbers, so chunk location is the safest exact locator.
+    """
+    author = _safe_author(result)
+    year = _safe_year(result)
+    title = _safe_title(result)
+    source = _safe_source(result)
+    chunk_id = result.get("chunk_id", 0)
+    locator = f"chunk {chunk_id}"
+
+    if style == "APA":
+        return f"{author}. ({year}). {title}. {source}, {locator}."
+    return f'{author}. "{title}." {source}, {year}, {locator}.'
+
+
+def append_requested_locations(
+    answer: Optional[str],
+    citations: List[CitationOut],
+    results: List[dict],
+    style: Optional[str],
+) -> Optional[str]:
+    if not answer or style is None or not citations:
+        return answer
+
+    lines: List[str] = []
+    for citation in citations:
+        idx = citation.id - 1
+        if 0 <= idx < len(results):
+            lines.append(f"[{citation.id}] {format_location(results[idx], style)}")
+
+    if not lines:
+        return answer
+
+    return f"{answer}\n\n{style} location(s):\n" + "\n".join(lines)
 
 @app.get("/")
 async def root():
@@ -110,10 +180,15 @@ def generate_grounded_answer(query: str, results: List[dict]) -> ChatAnswer:
     pattern as extract_metadata_with_llm above.
     """
     context_blocks = [
-        f"[{i}] (source: {r['source_file']}, chunk {r['chunk_id']})\n{r['content']}"
+        (
+            f"[{i}] (source: {r['source_file']}, title: {r.get('title', '')}, "
+            f"author: {r.get('author', '')}, year: {r.get('year', 0)}, "
+            f"chunk {r['chunk_id']})\n{r['content']}"
+        )
         for i, r in enumerate(results, start=1)
     ]
     context = "\n\n".join(context_blocks)
+    citation_style = requested_citation_style(query)
 
     prompt = f"""
     You are a research assistant. Answer the user's question using ONLY the
@@ -123,6 +198,10 @@ def generate_grounded_answer(query: str, results: List[dict]) -> ChatAnswer:
     In your structured "citations" output, each entry's "id" must be one of
     the excerpt numbers above, and "doc" must be copied exactly from that
     excerpt's "source" value.
+
+    If the user asks for APA or MLA format, answer the question normally first.
+    The backend will add exact formatted document locations from verified
+    retrieval metadata.
 
     If the excerpts do not contain enough information to answer the
     question, set "insufficient" to true and "answer" to null.
@@ -146,7 +225,7 @@ def generate_grounded_answer(query: str, results: List[dict]) -> ChatAnswer:
             )
             parsed: ChatAnswer = response.parsed
 
-           
+
             fixed_citations: List[CitationOut] = []
             for c in parsed.citations:
                 idx = c.id - 1
@@ -157,6 +236,12 @@ def generate_grounded_answer(query: str, results: List[dict]) -> ChatAnswer:
                         page=results[idx]["chunk_id"],
                     ))
             parsed.citations = fixed_citations
+            parsed.answer = append_requested_locations(
+                parsed.answer,
+                fixed_citations,
+                results,
+                citation_style,
+            )
             return parsed
         except Exception as e:
             last_error = e
@@ -187,23 +272,23 @@ async def upload_pdf(file: UploadFile = File(...)):
     Upload a PDF, extract text, parse metadata, and ingest into Elasticsearch.
     """
     file_path = os.path.join(UPLOAD_DIR, file.filename)
-    
+
     # 1. Save the uploaded file
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-    
+
     try:
         # 2. Extract text chunks from the file
         extracted_chunks = extract(file_path)
-        
+
         # 3. Sort chunks by page number and concatenate text
         extracted_chunks.sort(key=lambda x: x.get("page") if x.get("page") is not None else 0)
-        
+
         full_text_string = "".join(chunk["text"] for chunk in extracted_chunks)
-        
+
         # 4. Prepare metadata text from page 1 and 2
         intro_text = "".join(
-            chunk["text"] for chunk in extracted_chunks 
+            chunk["text"] for chunk in extracted_chunks
             if chunk.get("page") in [1, 2]
         )
         if not intro_text and extracted_chunks:
@@ -211,7 +296,7 @@ async def upload_pdf(file: UploadFile = File(...)):
 
         # 5. Extract metadata (with retries)
         metadata = extract_metadata_with_llm(intro_text, file.filename)
-        
+
         # 6. Assemble into ResearchPaper dictionary format
         paper_data: ResearchPaper = {
             "title": metadata.title,
@@ -220,11 +305,11 @@ async def upload_pdf(file: UploadFile = File(...)):
             "year": metadata.year,
             "source_file": file.filename
         }
-        
+
         # 7. Pass directly to the ingester
         # The ingester now has its own internal retry logic for embeddings.
         ingestion_result = ingest_paper(paper_data)
-        
+
         return {
             "status": "success",
             "filename": file.filename,

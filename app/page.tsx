@@ -3,7 +3,7 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect, ReactNode, KeyboardEvent } from "react";
 import { Plus, MessageSquare, BookOpen, FileText, Paperclip, ArrowUp, Loader2, AlertTriangle, Bot } from "lucide-react";
 
-// Types including message, chats, documents, citations  
+// Types including message, chats, documents, citations
 interface Citation { id: number; doc: string; page: number; }
 interface Message {
   id: string; role: "user" | "bot"; text?: string;
@@ -12,16 +12,19 @@ interface Message {
 interface Doc { name: string; pages: number; }
 interface Chat { id: string; title: string; messages: Message[]; docs: Doc[]; }
 
-//  Mock API (swap the 2 later) 
-const MOCKS = [
-  { answer: "The attention mechanism uses scaled dot-products between queries and keys. Scaling by √dₖ prevents vanishing gradients [1]. Multi-head attention replaces recurrence entirely, enabling full parallelisation [2].", citations: [{ id: 1, doc: "attention_is_all_you_need.pdf", page: 3 }, { id: 2, doc: "attention_is_all_you_need.pdf", page: 5 }], insufficient: false },
-  { answer: null, citations: [], insufficient: true },
-  { answer: "FlashAttention tiles the softmax to avoid materialising the full N×N matrix in HBM [1], reducing memory from O(N²) to O(N) and achieving 2–4× speedup [2].", citations: [{ id: 1, doc: "flash_attention.pdf", page: 2 }, { id: 2, doc: "flash_attention.pdf", page: 7 }], insufficient: false },
-];
-let mockIdx = 0;
-async function queryDocuments(_query: string) {
-  await new Promise(r => setTimeout(r, 900 + Math.random() * 600));
-  return MOCKS[mockIdx++ % MOCKS.length];
+async function queryDocuments(query: string) {
+  const backendUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const res = await fetch(`${backendUrl}/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Chat request failed: ${res.statusText}`);
+  }
+
+  return await res.json();
 }
 async function uploadDocument(file: File): Promise<Doc> {
   const backendUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -104,7 +107,7 @@ function ChatProvider({ children }: { children: ReactNode }) {
   );
 }
 
-// ── Sidebar 
+// ── Sidebar
 function Sidebar() {
   const { chats, activeChatId, createChat, switchChat } = useChatCtx();
   return (
@@ -128,7 +131,7 @@ function Sidebar() {
   );
 }
 
-// Topbar 
+// Topbar
 function Topbar() {
   const { activeChat } = useChatCtx();
   return (
@@ -192,7 +195,7 @@ function MessageList() {
                     <div key={c.id} className="citation-item">
                       <span className="citation-badge">[{c.id}]</span>
                       <FileText size={12} strokeWidth={1.5} />
-                      {c.doc} · Page {c.page}
+                      {c.doc} - Chunk {c.page}
                     </div>
                   ))}
                 </div>
@@ -212,7 +215,7 @@ function MessageList() {
   );
 }
 
-// Input bar 
+// Input bar
 function InputBar() {
   const { activeChat, isLoading, sendMessage, uploadFiles, createChat } = useChatCtx();
   const [query, setQuery] = useState("");
@@ -273,7 +276,7 @@ function InputBar() {
   );
 }
 
-// Page 
+// Page
 export default function Page() {
   return (
     <ChatProvider>

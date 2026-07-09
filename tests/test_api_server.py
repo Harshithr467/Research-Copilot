@@ -20,9 +20,14 @@ def client():
     return TestClient(app)
 
 
-def _fake_search_result(source_file="paper.pdf", chunk_id=0, content="Some text."):
+def _fake_search_result(
+    source_file="paper.pdf",
+    chunk_id=0,
+    content="Some text.",
+    title="A Paper",
+):
     return {
-        "title": "A Paper",
+        "title": title,
         "content": content,
         "score": 1.0,
         "author": "Someone",
@@ -99,6 +104,34 @@ def test_chat_rebuilds_citations_from_real_results_not_llm_output(client):
 
     body = res.json()
     assert body["citations"] == [{"id": 1, "doc": "real_source.pdf", "page": 7}]
+
+
+def test_chat_appends_apa_locations_when_requested(client):
+    results = [
+        _fake_search_result(
+            title="Example Study",
+            source_file="example.pdf",
+            chunk_id=4,
+        )
+    ]
+
+    mock_llm_response = MagicMock()
+    mock_llm_response.parsed = ChatAnswer(
+        answer="The document supports the claim [1].",
+        citations=[CitationOut(id=1, doc="example.pdf", page=4)],
+        insufficient=False,
+    )
+
+    with patch("api_server.search", return_value=results), \
+         patch.object(api_server.client.models, "generate_content", return_value=mock_llm_response):
+        res = client.post("/chat", json={"query": "Explain this in APA format"})
+
+    body = res.json()
+    assert body["insufficient"] is False
+    assert "APA location(s):" in body["answer"]
+    assert "Example Study" in body["answer"]
+    assert "example.pdf, chunk 4" in body["answer"]
+    assert body["citations"] == [{"id": 1, "doc": "example.pdf", "page": 4}]
 
 
 def test_chat_drops_citation_ids_with_no_matching_result(client):

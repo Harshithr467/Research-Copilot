@@ -5,10 +5,15 @@ node_modules/
 .env.local
 .env*.local
 html/
+uploaded_files/
+.pytest_cache/
 
+# OS/editor files
+.DS_Store
 
 # Ignore virtual environments
 venv/
+.conda/
 
 # Ignore compiled python files
 __pycache__/
