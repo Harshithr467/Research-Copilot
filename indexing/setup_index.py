@@ -23,7 +23,7 @@ def create_research_index():
             },
             "embedding": {
                 "type": "dense_vector",
-                "dims": 768,
+                "dims": 384,
                 "index": True,
                 "similarity": "cosine"
             },
@@ -34,8 +34,7 @@ def create_research_index():
                     "year": {"type": "integer"},
                     "source_file": {"type": "keyword"},
                     "parent_id": {"type": "keyword"},
-                    "chunk_id": {"type": "integer"},
-                    "page_number": {"type": "integer"}
+                    "chunk_id": {"type": "integer"}
                 }
             }
         }
