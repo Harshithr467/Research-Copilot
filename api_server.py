@@ -114,6 +114,64 @@ def _safe_author(result: Mapping[str, Any]) -> str:
     return author if author else "Unknown Author"
 
 
+def _format_single_author_apa(author: str) -> str:
+    author = author.strip()
+    if not author:
+        return ""
+    if "et al" in author.lower():
+        return author
+
+    # Already looks like APA initials, e.g. "Soto, C. J."
+    if "," in author and re.search(r"\b[A-Z]\.", author):
+        return author
+
+    parts = author.split()
+    if len(parts) < 2:
+        return author
+
+    suffixes = {"Jr.", "Sr.", "II", "III", "IV"}
+    suffix = ""
+    if parts[-1] in suffixes:
+        suffix = f", {parts.pop()}"
+
+    last_name = parts[-1]
+    initials = " ".join(f"{part[0]}." for part in parts[:-1] if part)
+    return f"{last_name}, {initials}{suffix}".strip()
+
+
+def _split_author_names(author: str) -> List[str]:
+    normalized = re.sub(r"\s+(?:and|&)\s+", ", ", author.strip())
+    names = [name.strip() for name in normalized.split(",") if name.strip()]
+
+    # Preserve already-APA author strings such as "Soto, C. J., & John, O. P."
+    if len(names) > 1 and any(re.fullmatch(r"(?:[A-Z]\.\s*)+", name) for name in names[1::2]):
+        rebuilt: List[str] = []
+        i = 0
+        while i < len(names):
+            if i + 1 < len(names) and re.fullmatch(r"(?:[A-Z]\.\s*)+", names[i + 1]):
+                rebuilt.append(f"{names[i]}, {names[i + 1]}")
+                i += 2
+            else:
+                rebuilt.append(names[i])
+                i += 1
+        return rebuilt
+
+    return names
+
+
+def format_authors_apa(author: str) -> str:
+    authors = [_format_single_author_apa(name) for name in _split_author_names(author)]
+    authors = [author for author in authors if author]
+
+    if not authors:
+        return "Unknown Author"
+    if len(authors) == 1:
+        return authors[0]
+    if len(authors) == 2:
+        return f"{authors[0]}, & {authors[1]}"
+    return f"{', '.join(authors[:-1])}, & {authors[-1]}"
+
+
 def _safe_year(result: Mapping[str, Any]) -> str:
     year = result.get("year")
     return str(year) if isinstance(year, int) and year > 0 else "n.d."
@@ -152,7 +210,7 @@ def format_location(result: Mapping[str, Any], style: Optional[str]) -> str:
     locator = _page_locator(result)
 
     if style == "APA":
-        return f"{author}. ({year}). {title}. {source}, {locator}."
+        return f"{format_authors_apa(author)}. ({year}). {title}. {source}, {locator}."
     if style == "MLA":
         return f'{author}. "{title}." {source}, {year}, {locator}.'
     return f"{author}. {title}. {source}, {locator}."
@@ -169,6 +227,34 @@ def build_citation(result: Mapping[str, Any], citation_id: int, style: Optional[
         year=year if isinstance(year, int) and year > 0 else None,
         formatted=format_location(result, citation_style),
     )
+
+
+def _citation_key(result: Mapping[str, Any]) -> tuple[str, int | str]:
+    source = _safe_source(result)
+    page_number = _page_number(result)
+    if page_number is not None:
+        return (source, page_number)
+    return (source, f"chunk:{result.get('chunk_id', 0)}")
+
+
+def _repair_answer_citation_ids(answer: Optional[str], id_map: Mapping[int, int]) -> Optional[str]:
+    if not answer or not id_map:
+        return answer
+
+    def replace_bracket(match: re.Match[str]) -> str:
+        raw_ids = [int(value) for value in re.findall(r"\d+", match.group(1))]
+        repaired_ids: List[int] = []
+        for raw_id in raw_ids:
+            repaired_id = id_map.get(raw_id, raw_id)
+            if repaired_id not in repaired_ids:
+                repaired_ids.append(repaired_id)
+        return "[" + ", ".join(str(value) for value in repaired_ids) + "]"
+
+    repaired = re.sub(r"\[([\d,\s]+)\]", replace_bracket, answer)
+    duplicate_adjacent = re.compile(r"(\[(\d+)\])(?:\s*\[\2\])+")
+    while duplicate_adjacent.search(repaired):
+        repaired = duplicate_adjacent.sub(r"\1", repaired)
+    return repaired
 
 
 def append_requested_locations(
@@ -254,11 +340,21 @@ def generate_grounded_answer(query: str, results: List[dict]) -> ChatAnswer:
 
 
             fixed_citations: List[CitationOut] = []
+            seen_citations: dict[tuple[str, int | str], int] = {}
+            citation_id_map: dict[int, int] = {}
             for c in parsed.citations:
                 idx = c.id - 1
                 if 0 <= idx < len(results):
+                    citation_key = _citation_key(results[idx])
+                    if citation_key in seen_citations:
+                        citation_id_map[c.id] = seen_citations[citation_key]
+                        continue
+
+                    citation_id_map[c.id] = c.id
+                    seen_citations[citation_key] = c.id
                     fixed_citations.append(build_citation(results[idx], c.id, citation_style))
             parsed.citations = fixed_citations
+            parsed.answer = _repair_answer_citation_ids(parsed.answer, citation_id_map)
             parsed.answer = append_requested_locations(
                 parsed.answer,
                 fixed_citations,

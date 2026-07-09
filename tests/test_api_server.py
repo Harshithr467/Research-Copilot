@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import api_server
-from api_server import app, ChatAnswer, CitationOut
+from api_server import app, ChatAnswer, CitationOut, format_authors_apa
 
 
 @pytest.fixture()
@@ -146,6 +146,48 @@ def test_chat_appends_apa_locations_when_requested(client):
     assert body["citations"][0]["page"] == 9
     assert body["citations"][0]["author"] == "Someone"
     assert body["citations"][0]["formatted"] == "Someone. (2024). Example Study. example.pdf, p. 9."
+
+
+def test_apa_author_formatting_for_multiple_authors():
+    authors = "Camille Jodouin, Andrew E. Derocher, Nicholas J. Lunn, David McGeachy, Nicholas W. Pilfold"
+
+    assert format_authors_apa(authors) == (
+        "Jodouin, C., Derocher, A. E., Lunn, N. J., "
+        "McGeachy, D., & Pilfold, N. W."
+    )
+
+
+def test_apa_author_formatting_for_two_authors():
+    assert format_authors_apa("Clarissa J. Soto, Oliver P. John") == "Soto, C. J., & John, O. P."
+    assert format_authors_apa("Soto, C. J., & John, O. P.") == "Soto, C. J., & John, O. P."
+
+
+def test_chat_deduplicates_citations_for_same_source_page(client):
+    results = [
+        _fake_search_result(source_file="paper.pdf", chunk_id=1, page_number=2),
+        _fake_search_result(source_file="paper.pdf", chunk_id=2, page_number=3),
+        _fake_search_result(source_file="paper.pdf", chunk_id=3, page_number=2),
+    ]
+
+    mock_llm_response = MagicMock()
+    mock_llm_response.parsed = ChatAnswer(
+        answer="Pregnant female polar bears migrate onto sea ice [1, 3].",
+        citations=[
+            CitationOut(id=1, doc="paper.pdf", page=2),
+            CitationOut(id=2, doc="paper.pdf", page=3),
+            CitationOut(id=3, doc="paper.pdf", page=2),
+        ],
+        insufficient=False,
+    )
+
+    with patch("api_server.search", return_value=results), \
+         patch.object(api_server.client.models, "generate_content", return_value=mock_llm_response):
+        res = client.post("/chat", json={"query": "What happens in February-March? Give APA citations."})
+
+    body = res.json()
+    assert body["answer"].startswith("Pregnant female polar bears migrate onto sea ice [1].")
+    assert [citation["page"] for citation in body["citations"]] == [2, 3]
+    assert len(body["citations"]) == 2
 
 
 def test_chat_appends_mla_locations_when_requested(client):
