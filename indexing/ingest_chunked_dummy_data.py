@@ -107,7 +107,8 @@ def ingest_data():
                     "year": paper['year'],
                     "source_file": paper['source_file'],
                     "parent_id": paper['id'],
-                    "chunk_id": i
+                    "chunk_id": i,
+                    "page_number": 1
                 }
             }
 

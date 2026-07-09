@@ -2,7 +2,7 @@ import os
 import re
 import shutil
 import time
-from typing import List, Optional
+from typing import Any, List, Mapping, Optional
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import run_in_threadpool
@@ -35,7 +35,10 @@ class ChatRequest(BaseModel):
 class CitationOut(BaseModel):
     id: int
     doc: str
-    page: int
+    page: Optional[int] = None
+    author: Optional[str] = None
+    year: Optional[int] = None
+    formatted: Optional[str] = None
 
 class ChatAnswer(BaseModel):
     answer: Optional[str]
@@ -106,41 +109,152 @@ def requested_citation_style(query: str) -> Optional[str]:
     return None
 
 
-def _safe_author(result: dict) -> str:
+def _safe_author(result: Mapping[str, Any]) -> str:
     author = str(result.get("author") or "").strip()
     return author if author else "Unknown Author"
 
 
-def _safe_year(result: dict) -> str:
+def _format_single_author_apa(author: str) -> str:
+    author = author.strip()
+    if not author:
+        return ""
+    if "et al" in author.lower():
+        return author
+
+    # Already looks like APA initials, e.g. "Soto, C. J."
+    if "," in author and re.search(r"\b[A-Z]\.", author):
+        return author
+
+    parts = author.split()
+    if len(parts) < 2:
+        return author
+
+    suffixes = {"Jr.", "Sr.", "II", "III", "IV"}
+    suffix = ""
+    if parts[-1] in suffixes:
+        suffix = f", {parts.pop()}"
+
+    last_name = parts[-1]
+    initials = " ".join(f"{part[0]}." for part in parts[:-1] if part)
+    return f"{last_name}, {initials}{suffix}".strip()
+
+
+def _split_author_names(author: str) -> List[str]:
+    normalized = re.sub(r"\s+(?:and|&)\s+", ", ", author.strip())
+    names = [name.strip() for name in normalized.split(",") if name.strip()]
+
+    # Preserve already-APA author strings such as "Soto, C. J., & John, O. P."
+    if len(names) > 1 and any(re.fullmatch(r"(?:[A-Z]\.\s*)+", name) for name in names[1::2]):
+        rebuilt: List[str] = []
+        i = 0
+        while i < len(names):
+            if i + 1 < len(names) and re.fullmatch(r"(?:[A-Z]\.\s*)+", names[i + 1]):
+                rebuilt.append(f"{names[i]}, {names[i + 1]}")
+                i += 2
+            else:
+                rebuilt.append(names[i])
+                i += 1
+        return rebuilt
+
+    return names
+
+
+def format_authors_apa(author: str) -> str:
+    authors = [_format_single_author_apa(name) for name in _split_author_names(author)]
+    authors = [author for author in authors if author]
+
+    if not authors:
+        return "Unknown Author"
+    if len(authors) == 1:
+        return authors[0]
+    if len(authors) == 2:
+        return f"{authors[0]}, & {authors[1]}"
+    return f"{', '.join(authors[:-1])}, & {authors[-1]}"
+
+
+def _safe_year(result: Mapping[str, Any]) -> str:
     year = result.get("year")
     return str(year) if isinstance(year, int) and year > 0 else "n.d."
 
 
-def _safe_title(result: dict) -> str:
+def _safe_title(result: Mapping[str, Any]) -> str:
     title = str(result.get("title") or "").strip()
     return title if title else str(result.get("source_file") or "Uploaded document")
 
 
-def _safe_source(result: dict) -> str:
+def _safe_source(result: Mapping[str, Any]) -> str:
     source = str(result.get("source_file") or "").strip()
     return source if source else "uploaded document"
 
 
-def format_location(result: dict, style: str) -> str:
-    """
-    Format the exact retrieved location. The current index stores chunk IDs, not
-    reliable page numbers, so chunk location is the safest exact locator.
-    """
+def _page_number(result: Mapping[str, Any]) -> Optional[int]:
+    page_number = result.get("page_number")
+    if isinstance(page_number, int) and page_number > 0:
+        return page_number
+    return None
+
+
+def _page_locator(result: Mapping[str, Any]) -> str:
+    page_number = _page_number(result)
+    if page_number is not None:
+        return f"p. {page_number}"
+    return f"chunk {result.get('chunk_id', 0)}"
+
+
+def format_location(result: Mapping[str, Any], style: Optional[str]) -> str:
+    """Format the retrieved source location in APA or MLA style."""
     author = _safe_author(result)
     year = _safe_year(result)
     title = _safe_title(result)
     source = _safe_source(result)
-    chunk_id = result.get("chunk_id", 0)
-    locator = f"chunk {chunk_id}"
+    locator = _page_locator(result)
 
     if style == "APA":
-        return f"{author}. ({year}). {title}. {source}, {locator}."
-    return f'{author}. "{title}." {source}, {year}, {locator}.'
+        return f"{format_authors_apa(author)}. ({year}). {title}. {source}, {locator}."
+    if style == "MLA":
+        return f'{author}. "{title}." {source}, {year}, {locator}.'
+    return f"{author}. {title}. {source}, {locator}."
+
+
+def build_citation(result: Mapping[str, Any], citation_id: int, style: Optional[str]) -> CitationOut:
+    year = result.get("year")
+    citation_style = style or "APA"
+    return CitationOut(
+        id=citation_id,
+        doc=_safe_source(result),
+        page=_page_number(result),
+        author=_safe_author(result),
+        year=year if isinstance(year, int) and year > 0 else None,
+        formatted=format_location(result, citation_style),
+    )
+
+
+def _citation_key(result: Mapping[str, Any]) -> tuple[str, int | str]:
+    source = _safe_source(result)
+    page_number = _page_number(result)
+    if page_number is not None:
+        return (source, page_number)
+    return (source, f"chunk:{result.get('chunk_id', 0)}")
+
+
+def _repair_answer_citation_ids(answer: Optional[str], id_map: Mapping[int, int]) -> Optional[str]:
+    if not answer or not id_map:
+        return answer
+
+    def replace_bracket(match: re.Match[str]) -> str:
+        raw_ids = [int(value) for value in re.findall(r"\d+", match.group(1))]
+        repaired_ids: List[int] = []
+        for raw_id in raw_ids:
+            repaired_id = id_map.get(raw_id, raw_id)
+            if repaired_id not in repaired_ids:
+                repaired_ids.append(repaired_id)
+        return "[" + ", ".join(str(value) for value in repaired_ids) + "]"
+
+    repaired = re.sub(r"\[([\d,\s]+)\]", replace_bracket, answer)
+    duplicate_adjacent = re.compile(r"(\[(\d+)\])(?:\s*\[\2\])+")
+    while duplicate_adjacent.search(repaired):
+        repaired = duplicate_adjacent.sub(r"\1", repaired)
+    return repaired
 
 
 def append_requested_locations(
@@ -154,9 +268,8 @@ def append_requested_locations(
 
     lines: List[str] = []
     for citation in citations:
-        idx = citation.id - 1
-        if 0 <= idx < len(results):
-            lines.append(f"[{citation.id}] {format_location(results[idx], style)}")
+        if citation.formatted:
+            lines.append(f"[{citation.id}] {citation.formatted}")
 
     if not lines:
         return answer
@@ -183,7 +296,7 @@ def generate_grounded_answer(query: str, results: List[dict]) -> ChatAnswer:
         (
             f"[{i}] (source: {r['source_file']}, title: {r.get('title', '')}, "
             f"author: {r.get('author', '')}, year: {r.get('year', 0)}, "
-            f"chunk {r['chunk_id']})\n{r['content']}"
+            f"page: {r.get('page_number')}, chunk {r['chunk_id']})\n{r['content']}"
         )
         for i, r in enumerate(results, start=1)
     ]
@@ -227,15 +340,21 @@ def generate_grounded_answer(query: str, results: List[dict]) -> ChatAnswer:
 
 
             fixed_citations: List[CitationOut] = []
+            seen_citations: dict[tuple[str, int | str], int] = {}
+            citation_id_map: dict[int, int] = {}
             for c in parsed.citations:
                 idx = c.id - 1
                 if 0 <= idx < len(results):
-                    fixed_citations.append(CitationOut(
-                        id=c.id,
-                        doc=results[idx]["source_file"],
-                        page=results[idx]["chunk_id"],
-                    ))
+                    citation_key = _citation_key(results[idx])
+                    if citation_key in seen_citations:
+                        citation_id_map[c.id] = seen_citations[citation_key]
+                        continue
+
+                    citation_id_map[c.id] = c.id
+                    seen_citations[citation_key] = c.id
+                    fixed_citations.append(build_citation(results[idx], c.id, citation_style))
             parsed.citations = fixed_citations
+            parsed.answer = _repair_answer_citation_ids(parsed.answer, citation_id_map)
             parsed.answer = append_requested_locations(
                 parsed.answer,
                 fixed_citations,
@@ -303,7 +422,11 @@ async def upload_pdf(file: UploadFile = File(...)):
             "content": full_text_string,
             "author": metadata.author,
             "year": metadata.year,
-            "source_file": file.filename
+            "source_file": file.filename,
+            "pages": [
+                {"text": chunk["text"], "page": chunk.get("page")}
+                for chunk in extracted_chunks
+            ],
         }
 
         # 7. Pass directly to the ingester

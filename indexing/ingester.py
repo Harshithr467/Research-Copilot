@@ -1,9 +1,6 @@
-import os
 import hashlib
-import uuid
 import threading
-import time
-from typing import TypedDict, List, Dict
+from typing import NotRequired, TypedDict
 from dotenv import load_dotenv
 from elasticsearch import Elasticsearch
 
@@ -37,6 +34,11 @@ def _load_model_background():
 # daemon=True ensures this thread doesn't block the server from shutting down
 threading.Thread(target=_load_model_background, daemon=True).start()
 
+class ResearchPage(TypedDict):
+    text: str
+    page: int | None
+
+
 class ResearchPaper(TypedDict):
     """Type definition for the research paper input dictionary."""
     title: str
@@ -44,6 +46,7 @@ class ResearchPaper(TypedDict):
     author: str
     year: int
     source_file: str
+    pages: NotRequired[list[ResearchPage]]
 
 def get_embedding_model():
     """
@@ -85,8 +88,16 @@ def ingest_paper(paper: ResearchPaper) -> dict:
             length_function=len,
         )
 
-        # 5. Split content into chunks
-        chunks = text_splitter.split_text(paper['content'])
+        # 5. Split content into chunks, preserving PDF page metadata when available.
+        chunk_records: list[tuple[str, int | None]] = []
+        pages = paper.get("pages") or [{"text": paper["content"], "page": None}]
+        for page in pages:
+            page_text = page.get("text", "")
+            page_number = page.get("page")
+            for chunk_text in text_splitter.split_text(page_text):
+                chunk_records.append((chunk_text, page_number))
+
+        chunks = [chunk_text for chunk_text, _ in chunk_records]
         total_chunks = len(chunks)
         
         # 6. Generate embeddings for all chunks locally
@@ -95,20 +106,24 @@ def ingest_paper(paper: ResearchPaper) -> dict:
         
         # 7. Index each chunk into Elasticsearch
         chunks_indexed = 0
-        for i, (chunk_text, embedding) in enumerate(zip(chunks, all_embeddings)):
+        for i, ((chunk_text, page_number), embedding) in enumerate(zip(chunk_records, all_embeddings)):
             doc_id = f"{parent_id}_chunk_{i}"
             
+            metadata = {
+                "author": paper['author'],
+                "year": paper['year'],
+                "source_file": paper['source_file'],
+                "parent_id": parent_id,
+                "chunk_id": i,
+            }
+            if page_number is not None:
+                metadata["page_number"] = page_number
+
             doc = {
                 "title": paper['title'],
                 "content": chunk_text,
                 "embedding": embedding,
-                "metadata": {
-                    "author": paper['author'],
-                    "year": paper['year'],
-                    "source_file": paper['source_file'],
-                    "parent_id": parent_id,
-                    "chunk_id": i
-                }
+                "metadata": metadata
             }
             
             es.index(index=index_name, id=doc_id, document=doc)

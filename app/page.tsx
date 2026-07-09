@@ -4,7 +4,14 @@ import { createContext, useContext, useState, useCallback, useRef, useEffect, Re
 import { Plus, MessageSquare, BookOpen, FileText, Paperclip, ArrowUp, Loader2, AlertTriangle, Bot } from "lucide-react";
 
 // Types including message, chats, documents, citations
-interface Citation { id: number; doc: string; page: number; }
+interface Citation {
+  id: number;
+  doc: string;
+  page?: number | null;
+  author?: string | null;
+  year?: number | null;
+  formatted?: string | null;
+}
 interface Message {
   id: string; role: "user" | "bot"; text?: string;
   answer?: string | null; citations?: Citation[]; insufficient?: boolean;
@@ -195,7 +202,7 @@ function MessageList() {
                     <div key={c.id} className="citation-item">
                       <span className="citation-badge">[{c.id}]</span>
                       <FileText size={12} strokeWidth={1.5} />
-                      {c.doc} - Chunk {c.page}
+                      {c.formatted || `${c.doc}${c.page ? ` - p. ${c.page}` : ""}`}
                     </div>
                   ))}
                 </div>
