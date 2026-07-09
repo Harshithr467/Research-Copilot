@@ -24,6 +24,7 @@ def _fake_hit(
     year=2024,
     source_file="paper.pdf",
     chunk_id=0,
+    page_number=1,
 ) -> dict:
     return {
         "_id": f"paper_abc_{chunk_id}",
@@ -36,6 +37,7 @@ def _fake_hit(
                 "year": year,
                 "source_file": source_file,
                 "chunk_id": chunk_id,
+                "page_number": page_number,
             },
         },
     }
@@ -86,6 +88,7 @@ def test_search_result_fields_are_mapped_correctly(mock_embedder, mock_es):
     assert r["year"] == 2023
     assert r["source_file"] == "kerbl.pdf"
     assert r["chunk_id"] == 1
+    assert r["page_number"] == 1
 
 
 def test_search_embeds_query_with_shared_local_model(mock_embedder, mock_es):

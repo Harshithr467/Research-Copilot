@@ -105,7 +105,7 @@ Open your browser and navigate to [http://localhost:3000](http://localhost:3000)
 The chat endpoint is available at `POST /chat`. It retrieves relevant document chunks, sends them to the LLM with grounded-answer instructions, and returns:
 
 - `answer`: an LLM-generated answer based only on retrieved chunks
-- `citations`: source locations rebuilt from backend retrieval results
+- `citations`: source locations rebuilt from backend retrieval results, including author, source file, page number, and formatted citation text when metadata is available
 - `insufficient`: `true` when the retrieved chunks do not contain enough evidence
 
-If the user explicitly asks for MLA or APA format, the response includes exact document location details in that requested style when citation metadata is available.
+If the user explicitly asks for MLA or APA format, the response includes exact document location details in that requested style. PDF uploads preserve page numbers through extraction, indexing, retrieval, and chat citations. Re-run `python indexing/setup_index.py` before testing this locally because the Elasticsearch mapping includes `metadata.page_number`.

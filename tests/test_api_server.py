@@ -23,6 +23,7 @@ def client():
 def _fake_search_result(
     source_file="paper.pdf",
     chunk_id=0,
+    page_number=1,
     content="Some text.",
     title="A Paper",
 ):
@@ -34,6 +35,7 @@ def _fake_search_result(
         "year": 2024,
         "source_file": source_file,
         "chunk_id": chunk_id,
+        "page_number": page_number,
     }
 
 
@@ -80,7 +82,14 @@ def test_chat_generates_answer_from_search_results(client):
     body = res.json()
     assert body["insufficient"] is False
     assert body["answer"] == "Attention uses scaled dot-products [1]."
-    assert body["citations"] == [{"id": 1, "doc": "attention.pdf", "page": 2}]
+    assert body["citations"] == [{
+        "id": 1,
+        "doc": "attention.pdf",
+        "page": 1,
+        "author": "Someone",
+        "year": 2024,
+        "formatted": "Someone. (2024). A Paper. attention.pdf, p. 1.",
+    }]
 
 
 def test_chat_rebuilds_citations_from_real_results_not_llm_output(client):
@@ -89,7 +98,7 @@ def test_chat_rebuilds_citations_from_real_results_not_llm_output(client):
     endpoint should overwrite it with the real source_file/chunk_id from our
     own retrieval results, keyed by citation id.
     """
-    results = [_fake_search_result(source_file="real_source.pdf", chunk_id=7)]
+    results = [_fake_search_result(source_file="real_source.pdf", chunk_id=7, page_number=12)]
 
     mock_llm_response = MagicMock()
     mock_llm_response.parsed = ChatAnswer(
@@ -103,7 +112,9 @@ def test_chat_rebuilds_citations_from_real_results_not_llm_output(client):
         res = client.post("/chat", json={"query": "test"})
 
     body = res.json()
-    assert body["citations"] == [{"id": 1, "doc": "real_source.pdf", "page": 7}]
+    assert body["citations"][0]["doc"] == "real_source.pdf"
+    assert body["citations"][0]["page"] == 12
+    assert body["citations"][0]["formatted"] == "Someone. (2024). A Paper. real_source.pdf, p. 12."
 
 
 def test_chat_appends_apa_locations_when_requested(client):
@@ -112,6 +123,7 @@ def test_chat_appends_apa_locations_when_requested(client):
             title="Example Study",
             source_file="example.pdf",
             chunk_id=4,
+            page_number=9,
         )
     ]
 
@@ -130,8 +142,36 @@ def test_chat_appends_apa_locations_when_requested(client):
     assert body["insufficient"] is False
     assert "APA location(s):" in body["answer"]
     assert "Example Study" in body["answer"]
-    assert "example.pdf, chunk 4" in body["answer"]
-    assert body["citations"] == [{"id": 1, "doc": "example.pdf", "page": 4}]
+    assert "example.pdf, p. 9" in body["answer"]
+    assert body["citations"][0]["page"] == 9
+    assert body["citations"][0]["author"] == "Someone"
+    assert body["citations"][0]["formatted"] == "Someone. (2024). Example Study. example.pdf, p. 9."
+
+
+def test_chat_appends_mla_locations_when_requested(client):
+    results = [
+        _fake_search_result(
+            title="Example Study",
+            source_file="example.pdf",
+            page_number=3,
+        )
+    ]
+
+    mock_llm_response = MagicMock()
+    mock_llm_response.parsed = ChatAnswer(
+        answer="The document supports the claim [1].",
+        citations=[CitationOut(id=1, doc="example.pdf", page=3)],
+        insufficient=False,
+    )
+
+    with patch("api_server.search", return_value=results), \
+         patch.object(api_server.client.models, "generate_content", return_value=mock_llm_response):
+        res = client.post("/chat", json={"query": "Explain this in MLA format"})
+
+    body = res.json()
+    assert "MLA location(s):" in body["answer"]
+    assert 'Someone. "Example Study." example.pdf, 2024, p. 3.' in body["answer"]
+    assert body["citations"][0]["formatted"] == 'Someone. "Example Study." example.pdf, 2024, p. 3.'
 
 
 def test_chat_drops_citation_ids_with_no_matching_result(client):
@@ -152,7 +192,8 @@ def test_chat_drops_citation_ids_with_no_matching_result(client):
         res = client.post("/chat", json={"query": "test"})
 
     body = res.json()
-    assert body["citations"] == [{"id": 1, "doc": "only_one.pdf", "page": 0}]
+    assert len(body["citations"]) == 1
+    assert body["citations"][0]["doc"] == "only_one.pdf"
 
 
 def test_chat_falls_back_to_insufficient_when_llm_keeps_failing(client):

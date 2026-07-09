@@ -18,6 +18,7 @@ class SearchResult(TypedDict):
     source_file: str
     chunk_id: int
     parent_id: str
+    page_number: int | None
 
 
 class ElasticsearchClient(Protocol):
@@ -114,6 +115,7 @@ def search(
                 source_file=meta.get("source_file", ""),
                 chunk_id=meta.get("chunk_id", 0),
                 parent_id=meta.get("parent_id", ""),
+                page_number=meta.get("page_number"),
             )
         )
 
