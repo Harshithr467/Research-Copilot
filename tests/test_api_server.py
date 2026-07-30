@@ -12,7 +12,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 import api_server
-from api_server import app, ChatAnswer, CitationOut, format_authors_apa, format_authors_mla
+from api_server import app, ChatAnswer
+from citation_formatter import CitationOut, format_authors_apa, format_authors_mla
 
 
 @pytest.fixture()
