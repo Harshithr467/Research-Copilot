@@ -168,7 +168,7 @@ def test_mla_author_formatting():
     assert format_authors_mla("Clarissa J. Soto, Oliver P. John") == "Soto, Clarissa J., and Oliver P. John"
     assert format_authors_mla(
         "Camille Jodouin, Andrew E. Derocher, Nicholas J. Lunn"
-    ) == "Jodouin, Camille, et al."
+    ) == "Jodouin, Camille, Andrew E. Derocher, and Nicholas J. Lunn"
     assert format_authors_mla("Soto, C. J., & John, O. P.") == "Soto, C. J., and O. P. John"
 
 
@@ -253,7 +253,8 @@ def test_chat_uses_mla_works_cited_author_format(client):
 
     body = res.json()
     expected = (
-        'Jodouin, Camille, et al. "Polar bears in western Hudson Bay show limited on-ice site fidelity." '
+        'Jodouin, Camille, Andrew E. Derocher, Nicholas J. Lunn, David McGeachy, and Nicholas W. Pilfold. '
+        '"Polar bears in western Hudson Bay show limited on-ice site fidelity." '
         "s00300-025-03366-w.pdf, 2025, p. 2."
     )
     assert expected in body["answer"]

@@ -127,7 +127,9 @@ def format_authors_mla(author: str) -> str:
         second = _format_single_author_mla_following(authors[1])
         return f"{first}, and {second}"
 
-    return f"{_format_single_author_mla_first(authors[0])}, et al."
+    first = _format_single_author_mla_first(authors[0])
+    following = [_format_single_author_mla_following(name) for name in authors[1:]]
+    return f"{first}, {', '.join(following[:-1])}, and {following[-1]}"
 
 
 def _safe_year(result: Mapping[str, Any]) -> str:
