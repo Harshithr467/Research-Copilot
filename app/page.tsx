@@ -100,10 +100,24 @@ function ChatProvider({ children }: { children: ReactNode }) {
   }, [activeChatId, activeChat, update]);
 
   const uploadFiles = useCallback(async (files: File[]) => {
-    if (!activeChatId) return;
-    for (const file of files) {
-      const doc = await uploadDocument(file);
-      update(activeChatId, c => ({ ...c, docs: [...c.docs, doc] }));
+    if (activeChatId) {
+      // Case 1: A chat is already active. Upload and add docs to it.
+      for (const file of files) {
+        const doc = await uploadDocument(file);
+        update(activeChatId, c => ({ ...c, docs: [...c.docs, doc] }));
+      }
+    } else {
+      // Case 2: No active chat. Create a new one with the uploaded files.
+      const newChatId = uid();
+      const uploadedDocs: Doc[] = [];
+      // Perform all async uploads before setting state to avoid race conditions.
+      for (const file of files) {
+        const doc = await uploadDocument(file);
+        uploadedDocs.push(doc);
+      }
+      // Create the new chat with docs included and set it as active.
+      setChats(prev => [{ id: newChatId, title: "New chat", messages: [], docs: uploadedDocs }, ...prev]);
+      setActiveChatId(newChatId);
     }
   }, [activeChatId, update]);
 
@@ -253,8 +267,7 @@ function InputBar() {
   async function handleFiles(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
     if (!files.length) return;
-    if (!activeChat) createChat();
-    await uploadFiles(files);
+    await uploadFiles(files); // The upload function now handles chat creation
     e.target.value = "";
   }
 

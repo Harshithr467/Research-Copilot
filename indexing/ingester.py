@@ -1,6 +1,12 @@
 import hashlib
 import threading
-from typing import NotRequired, TypedDict
+import sys
+from typing import TypedDict
+
+if sys.version_info >= (3, 11):
+    from typing import NotRequired
+else:
+    from typing_extensions import NotRequired
 from dotenv import load_dotenv
 from elasticsearch import Elasticsearch
 
