@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import api_server
-from api_server import app, ChatAnswer, CitationOut, format_authors_apa
+from api_server import app, ChatAnswer, CitationOut, format_authors_apa, format_authors_mla
 
 
 @pytest.fixture()
@@ -162,6 +162,15 @@ def test_apa_author_formatting_for_two_authors():
     assert format_authors_apa("Soto, C. J., & John, O. P.") == "Soto, C. J., & John, O. P."
 
 
+def test_mla_author_formatting():
+    assert format_authors_mla("Homi K. Bhabha") == "Bhabha, Homi K."
+    assert format_authors_mla("Clarissa J. Soto, Oliver P. John") == "Soto, Clarissa J., and Oliver P. John"
+    assert format_authors_mla(
+        "Camille Jodouin, Andrew E. Derocher, Nicholas J. Lunn"
+    ) == "Jodouin, Camille, et al."
+    assert format_authors_mla("Soto, C. J., & John, O. P.") == "Soto, C. J., and O. P. John"
+
+
 def test_chat_deduplicates_citations_for_same_source_page(client):
     results = [
         _fake_search_result(source_file="paper.pdf", chunk_id=1, page_number=2),
@@ -214,6 +223,40 @@ def test_chat_appends_mla_locations_when_requested(client):
     assert "MLA location(s):" in body["answer"]
     assert 'Someone. "Example Study." example.pdf, 2024, p. 3.' in body["answer"]
     assert body["citations"][0]["formatted"] == 'Someone. "Example Study." example.pdf, 2024, p. 3.'
+
+
+def test_chat_uses_mla_works_cited_author_format(client):
+    results = [
+        _fake_search_result(
+            title="Polar bears in western Hudson Bay show limited on-ice site fidelity",
+            source_file="s00300-025-03366-w.pdf",
+            page_number=2,
+        )
+    ]
+    results[0]["author"] = (
+        "Camille Jodouin, Andrew E. Derocher, Nicholas J. Lunn, "
+        "David McGeachy, Nicholas W. Pilfold"
+    )
+    results[0]["year"] = 2025
+
+    mock_llm_response = MagicMock()
+    mock_llm_response.parsed = ChatAnswer(
+        answer="Pregnant female polar bears migrate onto sea ice [1].",
+        citations=[CitationOut(id=1, doc="s00300-025-03366-w.pdf", page=2)],
+        insufficient=False,
+    )
+
+    with patch("api_server.search", return_value=results), \
+         patch.object(api_server.client.models, "generate_content", return_value=mock_llm_response):
+        res = client.post("/chat", json={"query": "What happens in February-March? Give MLA citations."})
+
+    body = res.json()
+    expected = (
+        'Jodouin, Camille, et al. "Polar bears in western Hudson Bay show limited on-ice site fidelity." '
+        "s00300-025-03366-w.pdf, 2025, p. 2."
+    )
+    assert expected in body["answer"]
+    assert body["citations"][0]["formatted"] == expected
 
 
 def test_chat_drops_citation_ids_with_no_matching_result(client):

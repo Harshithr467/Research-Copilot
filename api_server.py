@@ -172,6 +172,60 @@ def format_authors_apa(author: str) -> str:
     return f"{', '.join(authors[:-1])}, & {authors[-1]}"
 
 
+def _format_single_author_mla_first(author: str) -> str:
+    author = author.strip()
+    if not author:
+        return ""
+    if "et al" in author.lower():
+        return author
+
+    # Already inverted, e.g. "Bhabha, Homi K."
+    if "," in author:
+        return author
+
+    parts = author.split()
+    if len(parts) < 2:
+        return author
+
+    suffixes = {"Jr.", "Sr.", "II", "III", "IV"}
+    suffix = ""
+    if parts[-1] in suffixes:
+        suffix = f", {parts.pop()}"
+
+    last_name = parts[-1]
+    rest_of_name = " ".join(parts[:-1])
+    return f"{last_name}, {rest_of_name}{suffix}".strip()
+
+
+def _format_single_author_mla_following(author: str) -> str:
+    author = author.strip()
+    if not author:
+        return ""
+
+    # Convert simple APA initials back to a readable following author form.
+    # Example: "John, O. P." -> "O. P. John"
+    if "," in author:
+        last_name, rest = [part.strip() for part in author.split(",", 1)]
+        return f"{rest} {last_name}".strip()
+
+    return author
+
+
+def format_authors_mla(author: str) -> str:
+    authors = [name for name in _split_author_names(author) if name]
+
+    if not authors:
+        return "Unknown Author"
+    if len(authors) == 1:
+        return _format_single_author_mla_first(authors[0])
+    if len(authors) == 2:
+        first = _format_single_author_mla_first(authors[0])
+        second = _format_single_author_mla_following(authors[1])
+        return f"{first}, and {second}"
+
+    return f"{_format_single_author_mla_first(authors[0])}, et al."
+
+
 def _safe_year(result: Mapping[str, Any]) -> str:
     year = result.get("year")
     return str(year) if isinstance(year, int) and year > 0 else "n.d."
@@ -212,7 +266,9 @@ def format_location(result: Mapping[str, Any], style: Optional[str]) -> str:
     if style == "APA":
         return f"{format_authors_apa(author)}. ({year}). {title}. {source}, {locator}."
     if style == "MLA":
-        return f'{author}. "{title}." {source}, {year}, {locator}.'
+        mla_author = format_authors_mla(author)
+        author_period = "" if mla_author.endswith(".") else "."
+        return f'{mla_author}{author_period} "{title}." {source}, {year}, {locator}.'
     return f"{author}. {title}. {source}, {locator}."
 
 
